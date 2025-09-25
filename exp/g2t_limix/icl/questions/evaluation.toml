@@ -1,0 +1,56 @@
+function = "bin.g2t_limix.main"
+n_seeds = 10
+
+[base_config]
+patience = 16
+amp = true
+n_epochs = 0
+batch_size = 1
+epoch_size = 10
+min_train_ratio = 0.75
+seq_len_pred = 1024
+finetune_mode = "full"
+shuffle_targets = true
+
+[base_config.optimizer]
+type = "AdamW"
+lr = 0.0003
+weight_decay = 0.0
+
+[base_config.data]
+cache = false
+path = "data/questions"
+setting = "transductive"
+num_policy = "standard"
+external_split = true
+
+[base_config.data.graph_encodings]
+preprocess = "noisy-quantile-normal"
+
+[base_config.data.graph_encodings.lap_pe]
+k = 14
+
+[base_config.data.graph_encodings.degree]
+log = true
+
+[base_config.data.graph_encodings.pagerank]
+log = true
+
+[base_config.data.nfa]
+num_modes = [
+    "mean",
+]
+
+[base_config.pearl]
+batch_size = 8
+output_dim = 16
+
+[base_config.pearl.backbone]
+type = "BaseGraphBackbone"
+conv_name = "gcn"
+norm_name = "none"
+residual = false
+n_layers = 3
+d_hidden = 512
+dropout = 0.1
+activation = "gelu"

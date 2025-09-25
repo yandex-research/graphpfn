@@ -1,0 +1,975 @@
+{
+    "function": "bin.evaluate.main",
+    "gpus": [
+        "NVIDIA A100-SXM4-80GB"
+    ],
+    "config": {
+        "function": "bin.g2t_limix.main",
+        "n_seeds": 10,
+        "base_config": {
+            "patience": 16,
+            "amp": true,
+            "n_epochs": 0,
+            "batch_size": 1,
+            "epoch_size": 10,
+            "min_train_ratio": 0.75,
+            "seq_len_pred": 1024,
+            "finetune_mode": "full",
+            "shuffle_targets": true,
+            "optimizer": {
+                "type": "AdamW",
+                "lr": 0.0003,
+                "weight_decay": 0.0
+            },
+            "data": {
+                "cache": false,
+                "path": "data/twitch-views",
+                "setting": "transductive",
+                "num_policy": "noisy-quantile-normal",
+                "ratio_policy": "noisy-quantile-uniform",
+                "cat_policy": "ordinal",
+                "internal_split_name": "RL",
+                "graph_encodings": {
+                    "preprocess": "noisy-quantile-normal",
+                    "lap_pe": {
+                        "k": 14
+                    },
+                    "degree": {
+                        "log": true
+                    },
+                    "pagerank": {
+                        "log": true
+                    }
+                },
+                "nfa": {}
+            },
+            "pearl": {
+                "batch_size": 8,
+                "output_dim": 16,
+                "backbone": {
+                    "type": "BaseGraphBackbone",
+                    "conv_name": "gcn",
+                    "norm_name": "none",
+                    "residual": false,
+                    "n_layers": 3,
+                    "d_hidden": 512,
+                    "dropout": 0.1,
+                    "activation": "gelu"
+                }
+            }
+        }
+    },
+    "reports": [
+        {
+            "function": "bin.g2t_limix.main",
+            "gpus": [
+                "NVIDIA A100-SXM4-80GB"
+            ],
+            "config": {
+                "seed": 0,
+                "patience": 16,
+                "amp": true,
+                "n_epochs": 0,
+                "batch_size": 1,
+                "epoch_size": 10,
+                "min_train_ratio": 0.75,
+                "seq_len_pred": 1024,
+                "finetune_mode": "full",
+                "shuffle_targets": true,
+                "optimizer": {
+                    "type": "AdamW",
+                    "lr": 0.0003,
+                    "weight_decay": 0.0
+                },
+                "data": {
+                    "cache": false,
+                    "path": "data/twitch-views",
+                    "setting": "transductive",
+                    "num_policy": "noisy-quantile-normal",
+                    "ratio_policy": "noisy-quantile-uniform",
+                    "cat_policy": "ordinal",
+                    "internal_split_name": "RL",
+                    "graph_encodings": {
+                        "preprocess": "noisy-quantile-normal",
+                        "lap_pe": {
+                            "k": 14
+                        },
+                        "degree": {
+                            "log": true
+                        },
+                        "pagerank": {
+                            "log": true
+                        }
+                    },
+                    "nfa": {}
+                },
+                "pearl": {
+                    "batch_size": 8,
+                    "output_dim": 16,
+                    "backbone": {
+                        "type": "BaseGraphBackbone",
+                        "conv_name": "gcn",
+                        "norm_name": "none",
+                        "residual": false,
+                        "n_layers": 3,
+                        "d_hidden": 512,
+                        "dropout": 0.1,
+                        "activation": "gelu"
+                    }
+                }
+            },
+            "n_parameters": 18636893,
+            "prediction_type": "labels",
+            "metrics": {
+                "train": {
+                    "rmse": 1.447177899748299,
+                    "mae": 1.0992337465286255,
+                    "r2": 0.7487184405326843,
+                    "score": 0.7487184405326843
+                },
+                "val": {
+                    "rmse": 1.570570435856997,
+                    "mae": 1.1848078966140747,
+                    "r2": 0.7072550654411316,
+                    "score": 0.7072550654411316
+                },
+                "test": {
+                    "rmse": 1.5678892654321053,
+                    "mae": 1.1874706745147705,
+                    "r2": 0.7092038989067078,
+                    "score": 0.7092038989067078
+                }
+            },
+            "train": {
+                "metrics": {
+                    "val": {
+                        "score": -Infinity
+                    }
+                }
+            },
+            "time": "0:00:00.087871",
+            "chunk_size": null,
+            "eval_batch_size": 4096
+        },
+        {
+            "function": "bin.g2t_limix.main",
+            "gpus": [
+                "NVIDIA A100-SXM4-80GB"
+            ],
+            "config": {
+                "seed": 1,
+                "patience": 16,
+                "amp": true,
+                "n_epochs": 0,
+                "batch_size": 1,
+                "epoch_size": 10,
+                "min_train_ratio": 0.75,
+                "seq_len_pred": 1024,
+                "finetune_mode": "full",
+                "shuffle_targets": true,
+                "optimizer": {
+                    "type": "AdamW",
+                    "lr": 0.0003,
+                    "weight_decay": 0.0
+                },
+                "data": {
+                    "cache": false,
+                    "path": "data/twitch-views",
+                    "setting": "transductive",
+                    "num_policy": "noisy-quantile-normal",
+                    "ratio_policy": "noisy-quantile-uniform",
+                    "cat_policy": "ordinal",
+                    "internal_split_name": "RL",
+                    "graph_encodings": {
+                        "preprocess": "noisy-quantile-normal",
+                        "lap_pe": {
+                            "k": 14
+                        },
+                        "degree": {
+                            "log": true
+                        },
+                        "pagerank": {
+                            "log": true
+                        }
+                    },
+                    "nfa": {}
+                },
+                "pearl": {
+                    "batch_size": 8,
+                    "output_dim": 16,
+                    "backbone": {
+                        "type": "BaseGraphBackbone",
+                        "conv_name": "gcn",
+                        "norm_name": "none",
+                        "residual": false,
+                        "n_layers": 3,
+                        "d_hidden": 512,
+                        "dropout": 0.1,
+                        "activation": "gelu"
+                    }
+                }
+            },
+            "n_parameters": 18636893,
+            "prediction_type": "labels",
+            "metrics": {
+                "train": {
+                    "rmse": 1.4295683430695834,
+                    "mae": 1.083836555480957,
+                    "r2": 0.7547965049743652,
+                    "score": 0.7547965049743652
+                },
+                "val": {
+                    "rmse": 1.5637729799821851,
+                    "mae": 1.1814610958099365,
+                    "r2": 0.7097835540771484,
+                    "score": 0.7097835540771484
+                },
+                "test": {
+                    "rmse": 1.5642277130153663,
+                    "mae": 1.1842930316925049,
+                    "r2": 0.7105605602264404,
+                    "score": 0.7105605602264404
+                }
+            },
+            "train": {
+                "metrics": {
+                    "val": {
+                        "score": -Infinity
+                    }
+                }
+            },
+            "time": "0:00:00.081626",
+            "chunk_size": null,
+            "eval_batch_size": 4096
+        },
+        {
+            "function": "bin.g2t_limix.main",
+            "gpus": [
+                "NVIDIA A100-SXM4-80GB"
+            ],
+            "config": {
+                "seed": 2,
+                "patience": 16,
+                "amp": true,
+                "n_epochs": 0,
+                "batch_size": 1,
+                "epoch_size": 10,
+                "min_train_ratio": 0.75,
+                "seq_len_pred": 1024,
+                "finetune_mode": "full",
+                "shuffle_targets": true,
+                "optimizer": {
+                    "type": "AdamW",
+                    "lr": 0.0003,
+                    "weight_decay": 0.0
+                },
+                "data": {
+                    "cache": false,
+                    "path": "data/twitch-views",
+                    "setting": "transductive",
+                    "num_policy": "noisy-quantile-normal",
+                    "ratio_policy": "noisy-quantile-uniform",
+                    "cat_policy": "ordinal",
+                    "internal_split_name": "RL",
+                    "graph_encodings": {
+                        "preprocess": "noisy-quantile-normal",
+                        "lap_pe": {
+                            "k": 14
+                        },
+                        "degree": {
+                            "log": true
+                        },
+                        "pagerank": {
+                            "log": true
+                        }
+                    },
+                    "nfa": {}
+                },
+                "pearl": {
+                    "batch_size": 8,
+                    "output_dim": 16,
+                    "backbone": {
+                        "type": "BaseGraphBackbone",
+                        "conv_name": "gcn",
+                        "norm_name": "none",
+                        "residual": false,
+                        "n_layers": 3,
+                        "d_hidden": 512,
+                        "dropout": 0.1,
+                        "activation": "gelu"
+                    }
+                }
+            },
+            "n_parameters": 18636893,
+            "prediction_type": "labels",
+            "metrics": {
+                "train": {
+                    "rmse": 1.4374878095027004,
+                    "mae": 1.0914539098739624,
+                    "r2": 0.752072274684906,
+                    "score": 0.752072274684906
+                },
+                "val": {
+                    "rmse": 1.562413175077893,
+                    "mae": 1.1803442239761353,
+                    "r2": 0.7102881073951721,
+                    "score": 0.7102881073951721
+                },
+                "test": {
+                    "rmse": 1.5619495948297886,
+                    "mae": 1.1829322576522827,
+                    "r2": 0.7114030122756958,
+                    "score": 0.7114030122756958
+                }
+            },
+            "train": {
+                "metrics": {
+                    "val": {
+                        "score": -Infinity
+                    }
+                }
+            },
+            "time": "0:00:00.092276",
+            "chunk_size": null,
+            "eval_batch_size": 4096
+        },
+        {
+            "function": "bin.g2t_limix.main",
+            "gpus": [
+                "NVIDIA A100-SXM4-80GB"
+            ],
+            "config": {
+                "seed": 3,
+                "patience": 16,
+                "amp": true,
+                "n_epochs": 0,
+                "batch_size": 1,
+                "epoch_size": 10,
+                "min_train_ratio": 0.75,
+                "seq_len_pred": 1024,
+                "finetune_mode": "full",
+                "shuffle_targets": true,
+                "optimizer": {
+                    "type": "AdamW",
+                    "lr": 0.0003,
+                    "weight_decay": 0.0
+                },
+                "data": {
+                    "cache": false,
+                    "path": "data/twitch-views",
+                    "setting": "transductive",
+                    "num_policy": "noisy-quantile-normal",
+                    "ratio_policy": "noisy-quantile-uniform",
+                    "cat_policy": "ordinal",
+                    "internal_split_name": "RL",
+                    "graph_encodings": {
+                        "preprocess": "noisy-quantile-normal",
+                        "lap_pe": {
+                            "k": 14
+                        },
+                        "degree": {
+                            "log": true
+                        },
+                        "pagerank": {
+                            "log": true
+                        }
+                    },
+                    "nfa": {}
+                },
+                "pearl": {
+                    "batch_size": 8,
+                    "output_dim": 16,
+                    "backbone": {
+                        "type": "BaseGraphBackbone",
+                        "conv_name": "gcn",
+                        "norm_name": "none",
+                        "residual": false,
+                        "n_layers": 3,
+                        "d_hidden": 512,
+                        "dropout": 0.1,
+                        "activation": "gelu"
+                    }
+                }
+            },
+            "n_parameters": 18636893,
+            "prediction_type": "labels",
+            "metrics": {
+                "train": {
+                    "rmse": 1.435003517757982,
+                    "mae": 1.0889042615890503,
+                    "r2": 0.7529284954071045,
+                    "score": 0.7529284954071045
+                },
+                "val": {
+                    "rmse": 1.5672921508047315,
+                    "mae": 1.1854643821716309,
+                    "r2": 0.7084758877754211,
+                    "score": 0.7084758877754211
+                },
+                "test": {
+                    "rmse": 1.5644759082444883,
+                    "mae": 1.185045599937439,
+                    "r2": 0.7104686498641968,
+                    "score": 0.7104686498641968
+                }
+            },
+            "train": {
+                "metrics": {
+                    "val": {
+                        "score": -Infinity
+                    }
+                }
+            },
+            "time": "0:00:00.093255",
+            "chunk_size": null,
+            "eval_batch_size": 4096
+        },
+        {
+            "function": "bin.g2t_limix.main",
+            "gpus": [
+                "NVIDIA A100-SXM4-80GB"
+            ],
+            "config": {
+                "seed": 4,
+                "patience": 16,
+                "amp": true,
+                "n_epochs": 0,
+                "batch_size": 1,
+                "epoch_size": 10,
+                "min_train_ratio": 0.75,
+                "seq_len_pred": 1024,
+                "finetune_mode": "full",
+                "shuffle_targets": true,
+                "optimizer": {
+                    "type": "AdamW",
+                    "lr": 0.0003,
+                    "weight_decay": 0.0
+                },
+                "data": {
+                    "cache": false,
+                    "path": "data/twitch-views",
+                    "setting": "transductive",
+                    "num_policy": "noisy-quantile-normal",
+                    "ratio_policy": "noisy-quantile-uniform",
+                    "cat_policy": "ordinal",
+                    "internal_split_name": "RL",
+                    "graph_encodings": {
+                        "preprocess": "noisy-quantile-normal",
+                        "lap_pe": {
+                            "k": 14
+                        },
+                        "degree": {
+                            "log": true
+                        },
+                        "pagerank": {
+                            "log": true
+                        }
+                    },
+                    "nfa": {}
+                },
+                "pearl": {
+                    "batch_size": 8,
+                    "output_dim": 16,
+                    "backbone": {
+                        "type": "BaseGraphBackbone",
+                        "conv_name": "gcn",
+                        "norm_name": "none",
+                        "residual": false,
+                        "n_layers": 3,
+                        "d_hidden": 512,
+                        "dropout": 0.1,
+                        "activation": "gelu"
+                    }
+                }
+            },
+            "n_parameters": 18636893,
+            "prediction_type": "labels",
+            "metrics": {
+                "train": {
+                    "rmse": 1.4331162824336483,
+                    "mae": 1.0890008211135864,
+                    "r2": 0.7535779476165771,
+                    "score": 0.7535779476165771
+                },
+                "val": {
+                    "rmse": 1.5645239881832524,
+                    "mae": 1.1834311485290527,
+                    "r2": 0.7095047235488892,
+                    "score": 0.7095047235488892
+                },
+                "test": {
+                    "rmse": 1.5645201022209,
+                    "mae": 1.1849844455718994,
+                    "r2": 0.7104523181915283,
+                    "score": 0.7104523181915283
+                }
+            },
+            "train": {
+                "metrics": {
+                    "val": {
+                        "score": -Infinity
+                    }
+                }
+            },
+            "time": "0:00:00.093305",
+            "chunk_size": null,
+            "eval_batch_size": 4096
+        },
+        {
+            "function": "bin.g2t_limix.main",
+            "gpus": [
+                "NVIDIA A100-SXM4-80GB"
+            ],
+            "config": {
+                "seed": 5,
+                "patience": 16,
+                "amp": true,
+                "n_epochs": 0,
+                "batch_size": 1,
+                "epoch_size": 10,
+                "min_train_ratio": 0.75,
+                "seq_len_pred": 1024,
+                "finetune_mode": "full",
+                "shuffle_targets": true,
+                "optimizer": {
+                    "type": "AdamW",
+                    "lr": 0.0003,
+                    "weight_decay": 0.0
+                },
+                "data": {
+                    "cache": false,
+                    "path": "data/twitch-views",
+                    "setting": "transductive",
+                    "num_policy": "noisy-quantile-normal",
+                    "ratio_policy": "noisy-quantile-uniform",
+                    "cat_policy": "ordinal",
+                    "internal_split_name": "RL",
+                    "graph_encodings": {
+                        "preprocess": "noisy-quantile-normal",
+                        "lap_pe": {
+                            "k": 14
+                        },
+                        "degree": {
+                            "log": true
+                        },
+                        "pagerank": {
+                            "log": true
+                        }
+                    },
+                    "nfa": {}
+                },
+                "pearl": {
+                    "batch_size": 8,
+                    "output_dim": 16,
+                    "backbone": {
+                        "type": "BaseGraphBackbone",
+                        "conv_name": "gcn",
+                        "norm_name": "none",
+                        "residual": false,
+                        "n_layers": 3,
+                        "d_hidden": 512,
+                        "dropout": 0.1,
+                        "activation": "gelu"
+                    }
+                }
+            },
+            "n_parameters": 18636893,
+            "prediction_type": "labels",
+            "metrics": {
+                "train": {
+                    "rmse": 1.438562083761229,
+                    "mae": 1.093545913696289,
+                    "r2": 0.7517015933990479,
+                    "score": 0.7517015933990479
+                },
+                "val": {
+                    "rmse": 1.560674516520964,
+                    "mae": 1.179611325263977,
+                    "r2": 0.7109324932098389,
+                    "score": 0.7109324932098389
+                },
+                "test": {
+                    "rmse": 1.5621198573217472,
+                    "mae": 1.1836401224136353,
+                    "r2": 0.711340069770813,
+                    "score": 0.711340069770813
+                }
+            },
+            "train": {
+                "metrics": {
+                    "val": {
+                        "score": -Infinity
+                    }
+                }
+            },
+            "time": "0:00:00.095498",
+            "chunk_size": null,
+            "eval_batch_size": 4096
+        },
+        {
+            "function": "bin.g2t_limix.main",
+            "gpus": [
+                "NVIDIA A100-SXM4-80GB"
+            ],
+            "config": {
+                "seed": 6,
+                "patience": 16,
+                "amp": true,
+                "n_epochs": 0,
+                "batch_size": 1,
+                "epoch_size": 10,
+                "min_train_ratio": 0.75,
+                "seq_len_pred": 1024,
+                "finetune_mode": "full",
+                "shuffle_targets": true,
+                "optimizer": {
+                    "type": "AdamW",
+                    "lr": 0.0003,
+                    "weight_decay": 0.0
+                },
+                "data": {
+                    "cache": false,
+                    "path": "data/twitch-views",
+                    "setting": "transductive",
+                    "num_policy": "noisy-quantile-normal",
+                    "ratio_policy": "noisy-quantile-uniform",
+                    "cat_policy": "ordinal",
+                    "internal_split_name": "RL",
+                    "graph_encodings": {
+                        "preprocess": "noisy-quantile-normal",
+                        "lap_pe": {
+                            "k": 14
+                        },
+                        "degree": {
+                            "log": true
+                        },
+                        "pagerank": {
+                            "log": true
+                        }
+                    },
+                    "nfa": {}
+                },
+                "pearl": {
+                    "batch_size": 8,
+                    "output_dim": 16,
+                    "backbone": {
+                        "type": "BaseGraphBackbone",
+                        "conv_name": "gcn",
+                        "norm_name": "none",
+                        "residual": false,
+                        "n_layers": 3,
+                        "d_hidden": 512,
+                        "dropout": 0.1,
+                        "activation": "gelu"
+                    }
+                }
+            },
+            "n_parameters": 18636893,
+            "prediction_type": "labels",
+            "metrics": {
+                "train": {
+                    "rmse": 1.4451446435730155,
+                    "mae": 1.0981519222259521,
+                    "r2": 0.7494240403175354,
+                    "score": 0.7494240403175354
+                },
+                "val": {
+                    "rmse": 1.566716798359032,
+                    "mae": 1.1830871105194092,
+                    "r2": 0.7086899280548096,
+                    "score": 0.7086899280548096
+                },
+                "test": {
+                    "rmse": 1.563718625736569,
+                    "mae": 1.1843605041503906,
+                    "r2": 0.7107489109039307,
+                    "score": 0.7107489109039307
+                }
+            },
+            "train": {
+                "metrics": {
+                    "val": {
+                        "score": -Infinity
+                    }
+                }
+            },
+            "time": "0:00:00.084612",
+            "chunk_size": null,
+            "eval_batch_size": 4096
+        },
+        {
+            "function": "bin.g2t_limix.main",
+            "gpus": [
+                "NVIDIA A100-SXM4-80GB"
+            ],
+            "config": {
+                "seed": 7,
+                "patience": 16,
+                "amp": true,
+                "n_epochs": 0,
+                "batch_size": 1,
+                "epoch_size": 10,
+                "min_train_ratio": 0.75,
+                "seq_len_pred": 1024,
+                "finetune_mode": "full",
+                "shuffle_targets": true,
+                "optimizer": {
+                    "type": "AdamW",
+                    "lr": 0.0003,
+                    "weight_decay": 0.0
+                },
+                "data": {
+                    "cache": false,
+                    "path": "data/twitch-views",
+                    "setting": "transductive",
+                    "num_policy": "noisy-quantile-normal",
+                    "ratio_policy": "noisy-quantile-uniform",
+                    "cat_policy": "ordinal",
+                    "internal_split_name": "RL",
+                    "graph_encodings": {
+                        "preprocess": "noisy-quantile-normal",
+                        "lap_pe": {
+                            "k": 14
+                        },
+                        "degree": {
+                            "log": true
+                        },
+                        "pagerank": {
+                            "log": true
+                        }
+                    },
+                    "nfa": {}
+                },
+                "pearl": {
+                    "batch_size": 8,
+                    "output_dim": 16,
+                    "backbone": {
+                        "type": "BaseGraphBackbone",
+                        "conv_name": "gcn",
+                        "norm_name": "none",
+                        "residual": false,
+                        "n_layers": 3,
+                        "d_hidden": 512,
+                        "dropout": 0.1,
+                        "activation": "gelu"
+                    }
+                }
+            },
+            "n_parameters": 18636893,
+            "prediction_type": "labels",
+            "metrics": {
+                "train": {
+                    "rmse": 1.439611459872249,
+                    "mae": 1.092777967453003,
+                    "r2": 0.7513391971588135,
+                    "score": 0.7513391971588135
+                },
+                "val": {
+                    "rmse": 1.5607234773742427,
+                    "mae": 1.179119348526001,
+                    "r2": 0.7109143733978271,
+                    "score": 0.7109143733978271
+                },
+                "test": {
+                    "rmse": 1.5621067315146269,
+                    "mae": 1.1835722923278809,
+                    "r2": 0.7113449573516846,
+                    "score": 0.7113449573516846
+                }
+            },
+            "train": {
+                "metrics": {
+                    "val": {
+                        "score": -Infinity
+                    }
+                }
+            },
+            "time": "0:00:00.101711",
+            "chunk_size": null,
+            "eval_batch_size": 4096
+        },
+        {
+            "function": "bin.g2t_limix.main",
+            "gpus": [
+                "NVIDIA A100-SXM4-80GB"
+            ],
+            "config": {
+                "seed": 8,
+                "patience": 16,
+                "amp": true,
+                "n_epochs": 0,
+                "batch_size": 1,
+                "epoch_size": 10,
+                "min_train_ratio": 0.75,
+                "seq_len_pred": 1024,
+                "finetune_mode": "full",
+                "shuffle_targets": true,
+                "optimizer": {
+                    "type": "AdamW",
+                    "lr": 0.0003,
+                    "weight_decay": 0.0
+                },
+                "data": {
+                    "cache": false,
+                    "path": "data/twitch-views",
+                    "setting": "transductive",
+                    "num_policy": "noisy-quantile-normal",
+                    "ratio_policy": "noisy-quantile-uniform",
+                    "cat_policy": "ordinal",
+                    "internal_split_name": "RL",
+                    "graph_encodings": {
+                        "preprocess": "noisy-quantile-normal",
+                        "lap_pe": {
+                            "k": 14
+                        },
+                        "degree": {
+                            "log": true
+                        },
+                        "pagerank": {
+                            "log": true
+                        }
+                    },
+                    "nfa": {}
+                },
+                "pearl": {
+                    "batch_size": 8,
+                    "output_dim": 16,
+                    "backbone": {
+                        "type": "BaseGraphBackbone",
+                        "conv_name": "gcn",
+                        "norm_name": "none",
+                        "residual": false,
+                        "n_layers": 3,
+                        "d_hidden": 512,
+                        "dropout": 0.1,
+                        "activation": "gelu"
+                    }
+                }
+            },
+            "n_parameters": 18636893,
+            "prediction_type": "labels",
+            "metrics": {
+                "train": {
+                    "rmse": 1.4444500798743103,
+                    "mae": 1.0978928804397583,
+                    "r2": 0.7496649026870728,
+                    "score": 0.7496649026870728
+                },
+                "val": {
+                    "rmse": 1.562809875278599,
+                    "mae": 1.1806801557540894,
+                    "r2": 0.7101409435272217,
+                    "score": 0.7101409435272217
+                },
+                "test": {
+                    "rmse": 1.562128862172148,
+                    "mae": 1.1839162111282349,
+                    "r2": 0.7113367319107056,
+                    "score": 0.7113367319107056
+                }
+            },
+            "train": {
+                "metrics": {
+                    "val": {
+                        "score": -Infinity
+                    }
+                }
+            },
+            "time": "0:00:00.093118",
+            "chunk_size": null,
+            "eval_batch_size": 4096
+        },
+        {
+            "function": "bin.g2t_limix.main",
+            "gpus": [
+                "NVIDIA A100-SXM4-80GB"
+            ],
+            "config": {
+                "seed": 9,
+                "patience": 16,
+                "amp": true,
+                "n_epochs": 0,
+                "batch_size": 1,
+                "epoch_size": 10,
+                "min_train_ratio": 0.75,
+                "seq_len_pred": 1024,
+                "finetune_mode": "full",
+                "shuffle_targets": true,
+                "optimizer": {
+                    "type": "AdamW",
+                    "lr": 0.0003,
+                    "weight_decay": 0.0
+                },
+                "data": {
+                    "cache": false,
+                    "path": "data/twitch-views",
+                    "setting": "transductive",
+                    "num_policy": "noisy-quantile-normal",
+                    "ratio_policy": "noisy-quantile-uniform",
+                    "cat_policy": "ordinal",
+                    "internal_split_name": "RL",
+                    "graph_encodings": {
+                        "preprocess": "noisy-quantile-normal",
+                        "lap_pe": {
+                            "k": 14
+                        },
+                        "degree": {
+                            "log": true
+                        },
+                        "pagerank": {
+                            "log": true
+                        }
+                    },
+                    "nfa": {}
+                },
+                "pearl": {
+                    "batch_size": 8,
+                    "output_dim": 16,
+                    "backbone": {
+                        "type": "BaseGraphBackbone",
+                        "conv_name": "gcn",
+                        "norm_name": "none",
+                        "residual": false,
+                        "n_layers": 3,
+                        "d_hidden": 512,
+                        "dropout": 0.1,
+                        "activation": "gelu"
+                    }
+                }
+            },
+            "n_parameters": 18636893,
+            "prediction_type": "labels",
+            "metrics": {
+                "train": {
+                    "rmse": 1.4423097502864926,
+                    "mae": 1.095616102218628,
+                    "r2": 0.7504061460494995,
+                    "score": 0.7504061460494995
+                },
+                "val": {
+                    "rmse": 1.5642843357809204,
+                    "mae": 1.1807670593261719,
+                    "r2": 0.7095937728881836,
+                    "score": 0.7095937728881836
+                },
+                "test": {
+                    "rmse": 1.5623571712063544,
+                    "mae": 1.1831519603729248,
+                    "r2": 0.7112523317337036,
+                    "score": 0.7112523317337036
+                }
+            },
+            "train": {
+                "metrics": {
+                    "val": {
+                        "score": -Infinity
+                    }
+                }
+            },
+            "time": "0:00:00.091898",
+            "chunk_size": null,
+            "eval_batch_size": 4096
+        }
+    ],
+    "time": 1212.663009970449
+}

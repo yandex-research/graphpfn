@@ -1,0 +1,118 @@
+{
+    "function": "bin.tune.main",
+    "gpus": [
+        "NVIDIA A100-SXM4-80GB"
+    ],
+    "config": {
+        "seed": 0,
+        "n_trials": 100,
+        "sampler_type": "BruteForceSampler",
+        "function": "bin.graphpfn_evaluate.main",
+        "space": {
+            "seed": 0,
+            "amp": true,
+            "checkpoint_name": "graphpfn-v1",
+            "unfreeze_all": true,
+            "n_steps": -1,
+            "epoch_size": 10,
+            "patience": 4,
+            "seq_len_pred": 1024,
+            "min_train_ratio": 0.75,
+            "data": {
+                "cache": false,
+                "path": "data/hm-prices",
+                "setting": "transductive",
+                "num_policy": "noisy-quantile-normal",
+                "ratio_policy": "noisy-quantile-uniform",
+                "cat_policy": "ordinal",
+                "internal_split_name": "RL"
+            },
+            "optimizer": {
+                "type": "AdamW",
+                "lr": [
+                    "_tune_",
+                    "categorical",
+                    [
+                        4.999998054699972e-06,
+                        8.340500244230498e-06,
+                        1.3912793292547576e-05,
+                        2.320794010302052e-05,
+                        3.871318040182814e-05,
+                        6.457747804233804e-05,
+                        0.00010772173118311912,
+                        0.00017969068721868098,
+                        0.00029974215431138873,
+                        0.0005000000819563866
+                    ]
+                ],
+                "weight_decay": 0.0
+            }
+        }
+    },
+    "best": {
+        "function": "bin.graphpfn_evaluate.main",
+        "gpus": [
+            "NVIDIA A100-SXM4-80GB"
+        ],
+        "config": {
+            "seed": 0,
+            "amp": true,
+            "checkpoint_name": "graphpfn-v1",
+            "unfreeze_all": true,
+            "n_steps": -1,
+            "epoch_size": 10,
+            "patience": 4,
+            "seq_len_pred": 1024,
+            "min_train_ratio": 0.75,
+            "data": {
+                "cache": false,
+                "path": "data/hm-prices",
+                "setting": "transductive",
+                "num_policy": "noisy-quantile-normal",
+                "ratio_policy": "noisy-quantile-uniform",
+                "cat_policy": "ordinal",
+                "internal_split_name": "RL"
+            },
+            "optimizer": {
+                "type": "AdamW",
+                "lr": 0.00010772173118311912,
+                "weight_decay": 0.0
+            }
+        },
+        "metrics": {
+            "val": {
+                "rmse": 0.009253887904431993,
+                "mae": 0.00579922366887331,
+                "r2": 0.8088511228561401,
+                "score": 0.8088511228561401
+            },
+            "test": {
+                "rmse": 0.009798231303277817,
+                "mae": 0.0057970620691776276,
+                "r2": 0.7912449836730957,
+                "score": 0.7912449836730957
+            }
+        },
+        "train": {
+            "metrics": {
+                "val": {
+                    "rmse": 0.009249012990652014,
+                    "mae": 0.0057983496226370335,
+                    "r2": 0.8090524673461914,
+                    "score": 0.8090524673461914
+                },
+                "test": {
+                    "rmse": 0.009799873007192655,
+                    "mae": 0.0057962797582149506,
+                    "r2": 0.7911750674247742,
+                    "score": 0.7911750674247742
+                }
+            },
+            "best_step": 60
+        },
+        "trial_id": 8,
+        "tuning_time": "13:04:24.554982"
+    },
+    "time": 57826.63891134411,
+    "n_completed_trials": 10
+}

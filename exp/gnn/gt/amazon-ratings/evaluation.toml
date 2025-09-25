@@ -1,0 +1,32 @@
+function = "bin.base.main"
+n_seeds = 10
+
+[base_config]
+n_steps = 1000
+patience = 100
+
+[base_config.data]
+cache = false
+path = "data/amazon-ratings"
+setting = "transductive"
+add_self_loops = true
+num_policy = "none"
+external_split = true
+
+[base_config.data.pca.params]
+dim = 1000000
+
+[base_config.model.backbone]
+type = "BaseGraphBackbone"
+conv_name = "gt"
+norm_name = "layer"
+residual = true
+n_layers = 3
+d_hidden = 512
+dropout = 0.2
+activation = "gelu"
+
+[base_config.optimizer]
+type = "AdamW"
+lr = 0.0001
+weight_decay = 0.0

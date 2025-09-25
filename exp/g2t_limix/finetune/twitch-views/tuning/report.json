@@ -1,0 +1,183 @@
+{
+    "function": "bin.tune.main",
+    "gpus": [
+        "NVIDIA A100-SXM4-80GB"
+    ],
+    "config": {
+        "seed": 0,
+        "function": "bin.g2t_limix.main",
+        "n_trials": 100,
+        "sampler_type": "BruteForceSampler",
+        "space": {
+            "seed": 0,
+            "patience": 16,
+            "amp": true,
+            "n_epochs": -1,
+            "batch_size": 1,
+            "epoch_size": 10,
+            "min_train_ratio": 0.75,
+            "seq_len_pred": 1024,
+            "finetune_mode": "full",
+            "shuffle_targets": true,
+            "optimizer": {
+                "type": "AdamW",
+                "lr": [
+                    "_tune_",
+                    "categorical",
+                    [
+                        4.999998054699972e-06,
+                        8.340500244230498e-06,
+                        1.3912793292547576e-05,
+                        2.320794010302052e-05,
+                        3.871318040182814e-05,
+                        6.457747804233804e-05,
+                        0.00010772173118311912,
+                        0.00017969068721868098,
+                        0.00029974215431138873,
+                        0.0005000000819563866
+                    ]
+                ],
+                "weight_decay": 0.0
+            },
+            "data": {
+                "cache": false,
+                "path": "data/twitch-views",
+                "setting": "transductive",
+                "num_policy": "noisy-quantile-normal",
+                "ratio_policy": "noisy-quantile-uniform",
+                "cat_policy": "ordinal",
+                "internal_split_name": "RL",
+                "graph_encodings": {
+                    "preprocess": "noisy-quantile-normal",
+                    "lap_pe": {
+                        "k": 14
+                    },
+                    "degree": {
+                        "log": true
+                    },
+                    "pagerank": {
+                        "log": true
+                    }
+                },
+                "nfa": {}
+            },
+            "pearl": {
+                "batch_size": 8,
+                "output_dim": 16,
+                "backbone": {
+                    "type": "BaseGraphBackbone",
+                    "conv_name": "gcn",
+                    "norm_name": "none",
+                    "residual": false,
+                    "n_layers": 3,
+                    "d_hidden": 512,
+                    "dropout": 0.1,
+                    "activation": "gelu"
+                }
+            }
+        }
+    },
+    "best": {
+        "function": "bin.g2t_limix.main",
+        "gpus": [
+            "NVIDIA A100-SXM4-80GB"
+        ],
+        "config": {
+            "seed": 0,
+            "patience": 16,
+            "amp": true,
+            "n_epochs": -1,
+            "batch_size": 1,
+            "epoch_size": 10,
+            "min_train_ratio": 0.75,
+            "seq_len_pred": 1024,
+            "finetune_mode": "full",
+            "shuffle_targets": true,
+            "optimizer": {
+                "type": "AdamW",
+                "lr": 3.871318040182814e-05,
+                "weight_decay": 0.0
+            },
+            "data": {
+                "cache": false,
+                "path": "data/twitch-views",
+                "setting": "transductive",
+                "num_policy": "noisy-quantile-normal",
+                "ratio_policy": "noisy-quantile-uniform",
+                "cat_policy": "ordinal",
+                "internal_split_name": "RL",
+                "graph_encodings": {
+                    "preprocess": "noisy-quantile-normal",
+                    "lap_pe": {
+                        "k": 14
+                    },
+                    "degree": {
+                        "log": true
+                    },
+                    "pagerank": {
+                        "log": true
+                    }
+                },
+                "nfa": {}
+            },
+            "pearl": {
+                "batch_size": 8,
+                "output_dim": 16,
+                "backbone": {
+                    "type": "BaseGraphBackbone",
+                    "conv_name": "gcn",
+                    "norm_name": "none",
+                    "residual": false,
+                    "n_layers": 3,
+                    "d_hidden": 512,
+                    "dropout": 0.1,
+                    "activation": "gelu"
+                }
+            }
+        },
+        "n_parameters": 18636893,
+        "prediction_type": "labels",
+        "metrics": {
+            "train": {
+                "rmse": 1.3262332682942855,
+                "mae": 1.011251449584961,
+                "r2": 0.7889639735221863,
+                "score": 0.7889639735221863
+            },
+            "val": {
+                "rmse": 1.4928247179693677,
+                "mae": 1.1301723718643188,
+                "r2": 0.7355203628540039,
+                "score": 0.7355203628540039
+            },
+            "test": {
+                "rmse": 1.491122040162933,
+                "mae": 1.1329009532928467,
+                "r2": 0.7369827628135681,
+                "score": 0.7369827628135681
+            }
+        },
+        "train": {
+            "metrics": {
+                "val": {
+                    "rmse": 1.4949391344368426,
+                    "mae": 1.1315313577651978,
+                    "r2": 0.734770655632019,
+                    "score": 0.734770655632019
+                },
+                "train": {}
+            },
+            "best_step": 70
+        },
+        "time": "0:30:21.686221",
+        "chunk_size": null,
+        "eval_batch_size": 4096,
+        "trial_id": 2,
+        "tuning_time": "1:42:29.124888"
+    },
+    "time": 21253.372260110453,
+    "n_completed_trials": 10,
+    "continuations": [
+        3
+    ]
+}

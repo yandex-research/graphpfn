@@ -1,0 +1,60 @@
+seed = 0
+function = "bin.base.main"
+n_trials = 100
+sampler_type = "BruteForceSampler"
+
+[space]
+seed = 0
+n_steps = 1000
+patience = 100
+
+[space.data]
+cache = false
+path = "data/questions"
+setting = "transductive"
+add_self_loops = false
+num_policy = [
+    "_tune_",
+    "categorical",
+    [
+        "standard",
+        "none",
+    ],
+]
+external_split = true
+
+[space.data.pca.params]
+dim = 1000000
+
+[space.model.backbone]
+type = "BaseGraphBackbone"
+conv_name = "sage"
+norm_name = "layer"
+residual = true
+n_layers = 3
+d_hidden = 512
+dropout = [
+    "_tune_",
+    "categorical",
+    [
+        0.0,
+        0.1,
+        0.2,
+    ],
+]
+activation = "gelu"
+
+[space.optimizer]
+type = "AdamW"
+lr = [
+    "_tune_",
+    "categorical",
+    [
+        3e-05,
+        0.0001,
+        0.0003,
+        0.001,
+        0.003,
+    ],
+]
+weight_decay = 0.0

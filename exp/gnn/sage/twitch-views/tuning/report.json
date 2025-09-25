@@ -1,0 +1,135 @@
+{
+    "function": "bin.tune.main",
+    "gpus": [
+        "NVIDIA A100-SXM4-80GB"
+    ],
+    "config": {
+        "seed": 0,
+        "function": "bin.base.main",
+        "n_trials": 100,
+        "sampler_type": "BruteForceSampler",
+        "space": {
+            "seed": 0,
+            "n_steps": 1000,
+            "patience": 100,
+            "data": {
+                "cache": false,
+                "path": "data/twitch-views",
+                "setting": "transductive",
+                "add_self_loops": false,
+                "num_policy": "noisy-quantile-normal",
+                "ratio_policy": [
+                    "_tune_",
+                    "categorical",
+                    [
+                        "noisy-quantile-normal",
+                        "none"
+                    ]
+                ],
+                "cat_policy": "one-hot",
+                "internal_split_name": "RL"
+            },
+            "model": {
+                "backbone": {
+                    "type": "BaseGraphBackbone",
+                    "conv_name": "sage",
+                    "norm_name": "layer",
+                    "residual": true,
+                    "n_layers": 3,
+                    "d_hidden": 512,
+                    "dropout": [
+                        "_tune_",
+                        "categorical",
+                        [
+                            0.0,
+                            0.1,
+                            0.2
+                        ]
+                    ],
+                    "activation": "gelu"
+                }
+            },
+            "optimizer": {
+                "type": "AdamW",
+                "lr": [
+                    "_tune_",
+                    "categorical",
+                    [
+                        3e-05,
+                        0.0001,
+                        0.0003,
+                        0.001,
+                        0.003
+                    ]
+                ],
+                "weight_decay": 0.0
+            }
+        }
+    },
+    "best": {
+        "function": "bin.base.main",
+        "gpus": [
+            "NVIDIA A100-SXM4-80GB"
+        ],
+        "config": {
+            "seed": 0,
+            "n_steps": 1000,
+            "patience": 100,
+            "data": {
+                "cache": false,
+                "path": "data/twitch-views",
+                "setting": "transductive",
+                "add_self_loops": false,
+                "num_policy": "noisy-quantile-normal",
+                "ratio_policy": "none",
+                "cat_policy": "one-hot",
+                "internal_split_name": "RL"
+            },
+            "model": {
+                "backbone": {
+                    "type": "BaseGraphBackbone",
+                    "conv_name": "sage",
+                    "norm_name": "layer",
+                    "residual": true,
+                    "n_layers": 3,
+                    "d_hidden": 512,
+                    "dropout": 0.0,
+                    "activation": "gelu"
+                }
+            },
+            "optimizer": {
+                "type": "AdamW",
+                "lr": 0.0001,
+                "weight_decay": 0.0
+            }
+        },
+        "n_parameters": 2905089,
+        "prediction_type": "labels",
+        "best_step": 639,
+        "metrics": {
+            "train": {
+                "rmse": 1.341136875554758,
+                "mae": 1.0370992422103882,
+                "r2": 0.7841942310333252,
+                "score": 0.7841942310333252
+            },
+            "val": {
+                "rmse": 1.7073942797928403,
+                "mae": 1.296507716178894,
+                "r2": 0.654026985168457,
+                "score": 0.654026985168457
+            },
+            "test": {
+                "rmse": 1.6879317826186129,
+                "mae": 1.2841938734054565,
+                "r2": 0.662970781326294,
+                "score": 0.662970781326294
+            }
+        },
+        "time": 308.7795902858488,
+        "trial_id": 28,
+        "tuning_time": "2:04:03.391909"
+    },
+    "time": 7705.949855193961,
+    "n_completed_trials": 30
+}

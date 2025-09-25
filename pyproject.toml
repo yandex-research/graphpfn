@@ -1,0 +1,120 @@
+[build-system]
+requires = ["setuptools >= 61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "GraphPFN"
+version = "0.0.1"
+description = "Official implementation of GraphPFN"
+requires-python = "==3.12.9"
+dependencies = [
+    # ==================================================================
+    # Template
+    # ==================================================================
+    "delu==0.0.26",
+    "loguru==0.7.3",
+    "numpy==2.2.4",
+    "optuna==4.2.1",
+    "PyYAML==6.0.2",
+    "rtdl-num-embeddings==0.0.11",
+    "rtdl-revisiting-models==0.0.2",
+    "scikit-learn==1.6.1",
+    "scipy==1.15.2",
+    "tensorboard==2.19.0",
+    "tomli-w==1.2.0",
+    "torch==2.4.0",
+    "tqdm==4.67.1",
+    # ==================================================================
+    # Project
+    # ==================================================================
+    "torch-geometric==2.6.1",
+    "dgl==2.4.0",
+    "ogb>=1.3.6",
+    "nvitop>=1.5.1",
+    "einops==0.8.1",
+    "loralib==0.1.2",
+    "lightgbm==4.3.0",
+    "catboost==1.2.3",
+    "xgboost==2.0.3",
+    "autogluon.tabular[mitra]==1.4.0",
+    "flash-attn==2.8.3",
+]
+
+[dependency-groups]
+dev = [
+    "bokeh>=3.7.3,<4",
+    "holoviews>=1.20.2,<2",
+    "hvplot>=0.11.3,<1",
+    "ipdb>=0.13.13,<1",
+    "ipython>=9.3.0,<10",
+    "ipywidgets>=8.1.7,<9",
+    "jupyterlab>=4.4.3,<5",
+    "matplotlib>=3.10.3,<4",
+    "mypy>=1.16.1,<2",
+    "nbclassic>=1.3.1,<2",
+    "notebook>=7.4.3,<8",
+    "pandas>=2.3.0,<3",
+    "panel>=1.7.1,<2",
+    "plotnine>=0.14.5,<1",
+    "polars>=1.30.0,<2",
+    "pudb>=2025.1",
+    "pytest>=8.4.0,<9",
+    "ruff>=0.12.0,<1",
+    "seaborn>=0.13.2,<1",
+    "setuptools>=80.9.0",
+]
+local = [
+    "tabulate",
+]
+
+[tool.mypy]
+check_untyped_defs = true
+ignore_missing_imports = true
+exclude = ["^local/*"]
+
+[tool.pyright]
+exclude = [
+    # Default rules
+    '**/node_modules',
+    '**/__pycache__',
+    '**/.*',
+    # Custom rules
+    "cache",
+    "data",
+    "exp",
+    "local",
+]
+# venv = ".venv"
+venvPath = "."
+
+[tool.ruff]
+line-length = 88
+extend-exclude = ["lib/limix", "lib/tabpfn"]
+
+[tool.ruff.lint]
+extend-select = ["RUF", "UP", "E501", "E731"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.setuptools]
+packages = ["lib", "bin"]
+
+[tool.uv]
+default-groups = ["dev"]
+package = true
+
+[tool.uv.extra-build-dependencies]
+flash-attn = [{ requirement = "torch", match-runtime = true }]
+
+[tool.uv.extra-build-variables]
+flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
+
+[[tool.uv.index]]
+name = "dgl-index"
+url = "https://data.dgl.ai/wheels/torch-2.4/cu124/repo.html"
+format = "flat"
+explicit = true
+
+[tool.uv.sources]
+dgl = { index = "dgl-index" }

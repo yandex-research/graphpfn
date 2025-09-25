@@ -1,0 +1,26 @@
+function = "bin.graphpfn_evaluate.main"
+n_seeds = 10
+
+[base_config]
+amp = true
+checkpoint_name = "none"
+unfreeze_all = true
+n_steps = -1
+epoch_size = 10
+patience = 4
+seq_len_pred = 1024
+min_train_ratio = 0.75
+
+[base_config.data]
+cache = false
+path = "data/artnet-views"
+setting = "transductive"
+num_policy = "noisy-quantile-normal"
+ratio_policy = "noisy-quantile-uniform"
+cat_policy = "ordinal"
+internal_split_name = "RL"
+
+[base_config.optimizer]
+type = "AdamW"
+lr = 0.0005000000819563866
+weight_decay = 0.0

@@ -1,0 +1,74 @@
+seed = 0
+function = "bin.g2t_limix.main"
+n_trials = 100
+sampler_type = "BruteForceSampler"
+
+[space]
+seed = 0
+patience = 16
+amp = true
+n_epochs = -1
+batch_size = 1
+epoch_size = 10
+min_train_ratio = 0.75
+seq_len_pred = 1024
+finetune_mode = "full"
+shuffle_targets = true
+
+[space.optimizer]
+type = "AdamW"
+lr = [
+    "_tune_",
+    "categorical",
+    [
+        4.999998054699972e-06,
+        8.340500244230498e-06,
+        1.3912793292547576e-05,
+        2.320794010302052e-05,
+        3.871318040182814e-05,
+        6.457747804233804e-05,
+        0.00010772173118311912,
+        0.00017969068721868098,
+        0.00029974215431138873,
+        0.0005000000819563866,
+    ],
+]
+weight_decay = 0.0
+
+[space.data]
+cache = false
+path = "data/pubmed"
+setting = "transductive"
+num_policy = "standard"
+external_split = true
+
+[space.data.graph_encodings]
+preprocess = "noisy-quantile-normal"
+
+[space.data.graph_encodings.lap_pe]
+k = 14
+
+[space.data.graph_encodings.degree]
+log = true
+
+[space.data.graph_encodings.pagerank]
+log = true
+
+[space.data.nfa]
+num_modes = [
+    "mean",
+]
+
+[space.pearl]
+batch_size = 8
+output_dim = 16
+
+[space.pearl.backbone]
+type = "BaseGraphBackbone"
+conv_name = "gcn"
+norm_name = "none"
+residual = false
+n_layers = 3
+d_hidden = 512
+dropout = 0.1
+activation = "gelu"

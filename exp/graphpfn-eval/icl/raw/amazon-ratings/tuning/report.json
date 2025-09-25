@@ -1,0 +1,181 @@
+{
+    "function": "bin.tune.main",
+    "gpus": [
+        "NVIDIA A100-SXM4-80GB"
+    ],
+    "config": {
+        "seed": 0,
+        "n_trials": 100,
+        "sampler_type": "BruteForceSampler",
+        "function": "bin.graphpfn_evaluate.main",
+        "space": {
+            "seed": 0,
+            "amp": true,
+            "checkpoint_name": "graphpfn-v1",
+            "unfreeze_all": true,
+            "n_steps": 0,
+            "epoch_size": 10,
+            "patience": 4,
+            "seq_len_pred": 1024,
+            "min_train_ratio": 0.75,
+            "data": {
+                "cache": false,
+                "path": "data/amazon-ratings",
+                "setting": "transductive",
+                "num_policy": "standard",
+                "external_split": true,
+                "pca": {
+                    "params": {
+                        "dim": 64
+                    }
+                }
+            },
+            "optimizer": {
+                "type": "AdamW",
+                "lr": 0.0003,
+                "weight_decay": 0.0
+            }
+        }
+    },
+    "best": {
+        "function": "bin.graphpfn_evaluate.main",
+        "gpus": [
+            "NVIDIA A100-SXM4-80GB"
+        ],
+        "config": {
+            "seed": 0,
+            "amp": true,
+            "checkpoint_name": "graphpfn-v1",
+            "unfreeze_all": true,
+            "n_steps": 0,
+            "epoch_size": 10,
+            "patience": 4,
+            "seq_len_pred": 1024,
+            "min_train_ratio": 0.75,
+            "data": {
+                "cache": false,
+                "path": "data/amazon-ratings",
+                "setting": "transductive",
+                "num_policy": "standard",
+                "external_split": true,
+                "pca": {
+                    "params": {
+                        "dim": 64
+                    }
+                }
+            },
+            "optimizer": {
+                "type": "AdamW",
+                "lr": 0.0003,
+                "weight_decay": 0.0
+            }
+        },
+        "metrics": {
+            "val": {
+                "0.0": {
+                    "precision": 0.45479082321187586,
+                    "recall": 0.5137195121951219,
+                    "f1-score": 0.4824624194702935,
+                    "support": 656.0
+                },
+                "1.0": {
+                    "precision": 0.4314410480349345,
+                    "recall": 0.5482796892341842,
+                    "f1-score": 0.48289345063538613,
+                    "support": 901.0
+                },
+                "2.0": {
+                    "precision": 0.36607142857142855,
+                    "recall": 0.3609154929577465,
+                    "f1-score": 0.36347517730496454,
+                    "support": 568.0
+                },
+                "3.0": {
+                    "precision": 0.3333333333333333,
+                    "recall": 0.0045871559633027525,
+                    "f1-score": 0.00904977375565611,
+                    "support": 218.0
+                },
+                "4.0": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1-score": 0.0,
+                    "support": 106.0
+                },
+                "accuracy": 0.42343813801551655,
+                "macro avg": {
+                    "precision": 0.3171273266303144,
+                    "recall": 0.2855003700700711,
+                    "f1-score": 0.26757616423326,
+                    "support": 2449.0
+                },
+                "weighted avg": {
+                    "precision": 0.3951271549210717,
+                    "recall": 0.42343813801551655,
+                    "f1-score": 0.39200044817596913,
+                    "support": 2449.0
+                },
+                "cross-entropy": 1.4783644629562125,
+                "score": 0.42343813801551655
+            },
+            "test": {
+                "0.0": {
+                    "precision": 0.4842087485222091,
+                    "recall": 0.5463033536585366,
+                    "f1-score": 0.5133852627809115,
+                    "support": 5248.0
+                },
+                "1.0": {
+                    "precision": 0.4467854039965248,
+                    "recall": 0.5707547169811321,
+                    "f1-score": 0.5012183235867447,
+                    "support": 7208.0
+                },
+                "2.0": {
+                    "precision": 0.35353535353535354,
+                    "recall": 0.3467635402906209,
+                    "f1-score": 0.35011670556852287,
+                    "support": 4542.0
+                },
+                "3.0": {
+                    "precision": 0.7,
+                    "recall": 0.004006868918145392,
+                    "f1-score": 0.00796812749003984,
+                    "support": 1747.0
+                },
+                "4.0": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1-score": 0.0,
+                    "support": 849.0
+                },
+                "accuracy": 0.43702153720526693,
+                "macro avg": {
+                    "precision": 0.3969059012108175,
+                    "recall": 0.29356569596968696,
+                    "f1-score": 0.27453768388524374,
+                    "support": 19594.0
+                },
+                "weighted avg": {
+                    "precision": 0.4384104460553781,
+                    "recall": 0.43702153720526693,
+                    "f1-score": 0.40375512559481525,
+                    "support": 19594.0
+                },
+                "cross-entropy": 1.441679742226574,
+                "score": 0.43702153720526693
+            }
+        },
+        "train": {
+            "metrics": {
+                "val": {
+                    "score": -Infinity
+                }
+            }
+        },
+        "trial_id": 0,
+        "tuning_time": "0:00:03.518641"
+    },
+    "time": 3.7531967042014003,
+    "n_completed_trials": 1
+}

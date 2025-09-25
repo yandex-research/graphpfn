@@ -1,0 +1,30 @@
+function = "bin.graphpfn_evaluate.main"
+n_seeds = 10
+
+[base_config]
+amp = true
+checkpoint_name = "graphpfn-v1"
+unfreeze_all = true
+n_steps = 0
+epoch_size = 10
+patience = 4
+seq_len_pred = 1024
+min_train_ratio = 0.75
+
+[base_config.data]
+cache = false
+path = "data/facebook"
+setting = "transductive"
+num_policy = "standard"
+external_split = true
+
+[base_config.data.graph_encodings]
+preprocess = "noisy-quantile-normal"
+
+[base_config.data.graph_encodings.lap_pe]
+k = 8
+
+[base_config.optimizer]
+type = "AdamW"
+lr = 0.0003
+weight_decay = 0.0

@@ -1,0 +1,190 @@
+{
+    "function": "bin.tune.main",
+    "gpus": [
+        "NVIDIA A100-SXM4-80GB"
+    ],
+    "config": {
+        "seed": 0,
+        "function": "bin.g2t_limix.main",
+        "n_trials": 100,
+        "sampler_type": "BruteForceSampler",
+        "space": {
+            "seed": 0,
+            "patience": 16,
+            "amp": true,
+            "n_epochs": -1,
+            "batch_size": 1,
+            "epoch_size": 10,
+            "min_train_ratio": 0.75,
+            "seq_len_pred": 1024,
+            "finetune_mode": "full",
+            "shuffle_targets": true,
+            "optimizer": {
+                "type": "AdamW",
+                "lr": [
+                    "_tune_",
+                    "categorical",
+                    [
+                        4.999998054699972e-06,
+                        8.340500244230498e-06,
+                        1.3912793292547576e-05,
+                        2.320794010302052e-05,
+                        3.871318040182814e-05,
+                        6.457747804233804e-05,
+                        0.00010772173118311912,
+                        0.00017969068721868098,
+                        0.00029974215431138873,
+                        0.0005000000819563866
+                    ]
+                ],
+                "weight_decay": 0.0
+            },
+            "data": {
+                "cache": false,
+                "path": "data/avazu-ctr",
+                "setting": "transductive",
+                "num_policy": "noisy-quantile-normal",
+                "ratio_policy": "noisy-quantile-uniform",
+                "cat_policy": "ordinal",
+                "internal_split_name": "RL",
+                "graph_encodings": {
+                    "preprocess": "noisy-quantile-normal",
+                    "lap_pe": {
+                        "k": 14
+                    },
+                    "degree": {
+                        "log": true
+                    },
+                    "pagerank": {
+                        "log": true
+                    }
+                },
+                "nfa": {},
+                "pca": {
+                    "params": {
+                        "dim": 64
+                    }
+                }
+            },
+            "pearl": {
+                "batch_size": 8,
+                "output_dim": 16,
+                "backbone": {
+                    "type": "BaseGraphBackbone",
+                    "conv_name": "gcn",
+                    "norm_name": "none",
+                    "residual": false,
+                    "n_layers": 3,
+                    "d_hidden": 512,
+                    "dropout": 0.1,
+                    "activation": "gelu"
+                }
+            }
+        }
+    },
+    "best": {
+        "function": "bin.g2t_limix.main",
+        "gpus": [
+            "NVIDIA A100-SXM4-80GB"
+        ],
+        "config": {
+            "seed": 0,
+            "patience": 16,
+            "amp": true,
+            "n_epochs": -1,
+            "batch_size": 1,
+            "epoch_size": 10,
+            "min_train_ratio": 0.75,
+            "seq_len_pred": 1024,
+            "finetune_mode": "full",
+            "shuffle_targets": true,
+            "optimizer": {
+                "type": "AdamW",
+                "lr": 1.3912793292547576e-05,
+                "weight_decay": 0.0
+            },
+            "data": {
+                "cache": false,
+                "path": "data/avazu-ctr",
+                "setting": "transductive",
+                "num_policy": "noisy-quantile-normal",
+                "ratio_policy": "noisy-quantile-uniform",
+                "cat_policy": "ordinal",
+                "internal_split_name": "RL",
+                "graph_encodings": {
+                    "preprocess": "noisy-quantile-normal",
+                    "lap_pe": {
+                        "k": 14
+                    },
+                    "degree": {
+                        "log": true
+                    },
+                    "pagerank": {
+                        "log": true
+                    }
+                },
+                "nfa": {},
+                "pca": {
+                    "params": {
+                        "dim": 64
+                    }
+                }
+            },
+            "pearl": {
+                "batch_size": 8,
+                "output_dim": 16,
+                "backbone": {
+                    "type": "BaseGraphBackbone",
+                    "conv_name": "gcn",
+                    "norm_name": "none",
+                    "residual": false,
+                    "n_layers": 3,
+                    "d_hidden": 512,
+                    "dropout": 0.1,
+                    "activation": "gelu"
+                }
+            }
+        },
+        "n_parameters": 18636893,
+        "prediction_type": "labels",
+        "metrics": {
+            "train": {
+                "rmse": 0.11070031782372139,
+                "mae": 0.0723976194858551,
+                "r2": 0.58287513256073,
+                "score": 0.58287513256073
+            },
+            "val": {
+                "rmse": 0.13774503662293952,
+                "mae": 0.09019483625888824,
+                "r2": 0.3348991274833679,
+                "score": 0.3348991274833679
+            },
+            "test": {
+                "rmse": 0.13722840410794482,
+                "mae": 0.08914892375469208,
+                "r2": 0.34254103899002075,
+                "score": 0.34254103899002075
+            }
+        },
+        "train": {
+            "metrics": {
+                "val": {
+                    "rmse": 0.13773141888082183,
+                    "mae": 0.09021198004484177,
+                    "r2": 0.33503061532974243,
+                    "score": 0.33503061532974243
+                },
+                "train": {}
+            },
+            "best_step": 20
+        },
+        "time": "0:16:48.281795",
+        "chunk_size": null,
+        "eval_batch_size": 4096,
+        "trial_id": 4,
+        "tuning_time": "1:36:22.945879"
+    },
+    "time": 11975.318756433204,
+    "n_completed_trials": 10
+}

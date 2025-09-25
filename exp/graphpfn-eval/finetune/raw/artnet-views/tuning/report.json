@@ -1,0 +1,118 @@
+{
+    "function": "bin.tune.main",
+    "gpus": [
+        "NVIDIA A100-SXM4-80GB"
+    ],
+    "config": {
+        "seed": 0,
+        "n_trials": 100,
+        "sampler_type": "BruteForceSampler",
+        "function": "bin.graphpfn_evaluate.main",
+        "space": {
+            "seed": 0,
+            "amp": true,
+            "checkpoint_name": "graphpfn-v1",
+            "unfreeze_all": true,
+            "n_steps": -1,
+            "epoch_size": 10,
+            "patience": 4,
+            "seq_len_pred": 1024,
+            "min_train_ratio": 0.75,
+            "data": {
+                "cache": false,
+                "path": "data/artnet-views",
+                "setting": "transductive",
+                "num_policy": "noisy-quantile-normal",
+                "ratio_policy": "noisy-quantile-uniform",
+                "cat_policy": "ordinal",
+                "internal_split_name": "RL"
+            },
+            "optimizer": {
+                "type": "AdamW",
+                "lr": [
+                    "_tune_",
+                    "categorical",
+                    [
+                        4.999998054699972e-06,
+                        8.340500244230498e-06,
+                        1.3912793292547576e-05,
+                        2.320794010302052e-05,
+                        3.871318040182814e-05,
+                        6.457747804233804e-05,
+                        0.00010772173118311912,
+                        0.00017969068721868098,
+                        0.00029974215431138873,
+                        0.0005000000819563866
+                    ]
+                ],
+                "weight_decay": 0.0
+            }
+        }
+    },
+    "best": {
+        "function": "bin.graphpfn_evaluate.main",
+        "gpus": [
+            "NVIDIA A100-SXM4-80GB"
+        ],
+        "config": {
+            "seed": 0,
+            "amp": true,
+            "checkpoint_name": "graphpfn-v1",
+            "unfreeze_all": true,
+            "n_steps": -1,
+            "epoch_size": 10,
+            "patience": 4,
+            "seq_len_pred": 1024,
+            "min_train_ratio": 0.75,
+            "data": {
+                "cache": false,
+                "path": "data/artnet-views",
+                "setting": "transductive",
+                "num_policy": "noisy-quantile-normal",
+                "ratio_policy": "noisy-quantile-uniform",
+                "cat_policy": "ordinal",
+                "internal_split_name": "RL"
+            },
+            "optimizer": {
+                "type": "AdamW",
+                "lr": 6.457747804233804e-05,
+                "weight_decay": 0.0
+            }
+        },
+        "metrics": {
+            "val": {
+                "rmse": 1.0218449789414508,
+                "mae": 0.8023574352264404,
+                "r2": 0.6423019170761108,
+                "score": 0.6423019170761108
+            },
+            "test": {
+                "rmse": 1.0180588536702768,
+                "mae": 0.7964017987251282,
+                "r2": 0.6442804336547852,
+                "score": 0.6442804336547852
+            }
+        },
+        "train": {
+            "metrics": {
+                "val": {
+                    "rmse": 1.021431040784688,
+                    "mae": 0.8020859956741333,
+                    "r2": 0.6425915956497192,
+                    "score": 0.6425915956497192
+                },
+                "test": {
+                    "rmse": 1.0178403900794681,
+                    "mae": 0.7962002158164978,
+                    "r2": 0.6444331407546997,
+                    "score": 0.6444331407546997
+                }
+            },
+            "best_step": 40
+        },
+        "trial_id": 0,
+        "tuning_time": "0:14:08.949426"
+    },
+    "time": 9730.622087778524,
+    "n_completed_trials": 10
+}

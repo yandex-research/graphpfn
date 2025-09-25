@@ -1,0 +1,58 @@
+seed = 0
+function = "bin.g2t_limix.main"
+n_trials = 100
+sampler_type = "BruteForceSampler"
+
+[space]
+seed = 0
+patience = 16
+amp = true
+n_epochs = 0
+batch_size = 1
+epoch_size = 10
+min_train_ratio = 0.75
+seq_len_pred = 1024
+finetune_mode = "full"
+shuffle_targets = true
+
+[space.optimizer]
+type = "AdamW"
+lr = 0.0003
+weight_decay = 0.0
+
+[space.data]
+cache = false
+path = "data/artnet-exp"
+setting = "transductive"
+num_policy = "noisy-quantile-normal"
+ratio_policy = "noisy-quantile-uniform"
+cat_policy = "ordinal"
+internal_split_name = "RL"
+
+[space.data.graph_encodings]
+preprocess = "noisy-quantile-normal"
+
+[space.data.graph_encodings.lap_pe]
+k = 14
+
+[space.data.graph_encodings.degree]
+log = true
+
+[space.data.graph_encodings.pagerank]
+log = true
+
+[space.data.nfa]
+
+[space.pearl]
+batch_size = 8
+output_dim = 16
+
+[space.pearl.backbone]
+type = "BaseGraphBackbone"
+conv_name = "gcn"
+norm_name = "none"
+residual = false
+n_layers = 3
+d_hidden = 512
+dropout = 0.1
+activation = "gelu"

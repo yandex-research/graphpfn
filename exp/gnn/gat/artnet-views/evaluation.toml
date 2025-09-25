@@ -1,0 +1,31 @@
+function = "bin.base.main"
+n_seeds = 10
+
+[base_config]
+n_steps = 1000
+patience = 100
+
+[base_config.data]
+cache = false
+path = "data/artnet-views"
+setting = "transductive"
+add_self_loops = true
+num_policy = "noisy-quantile-normal"
+ratio_policy = "noisy-quantile-normal"
+cat_policy = "one-hot"
+internal_split_name = "RL"
+
+[base_config.model.backbone]
+type = "BaseGraphBackbone"
+conv_name = "gat"
+norm_name = "layer"
+residual = true
+n_layers = 3
+d_hidden = 512
+dropout = 0.0
+activation = "gelu"
+
+[base_config.optimizer]
+type = "AdamW"
+lr = 0.0003
+weight_decay = 0.0

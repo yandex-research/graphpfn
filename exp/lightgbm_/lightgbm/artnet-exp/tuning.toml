@@ -1,0 +1,68 @@
+seed = 0
+function = "bin.lightgbm_.main"
+n_trials = 100
+sampler_type = "TPESampler"
+
+[sampler]
+n_startup_trials = 20
+
+[space]
+seed = 0
+
+[space.data]
+cache = false
+path = "data/artnet-exp"
+setting = "transductive"
+add_self_loops = false
+num_policy = "none"
+ratio_policy = "none"
+cat_policy = "ordinal"
+internal_split_name = "RL"
+
+[space.data.nfa]
+
+[space.model]
+n_estimators = 4000
+n_jobs = 4
+verbose = -1
+feature_fraction = [
+    "_tune_",
+    "uniform",
+    0.5,
+    1.0,
+]
+lambda_l2 = [
+    "_tune_",
+    "?loguniform",
+    0.0,
+    0.1,
+    10.0,
+]
+learning_rate = [
+    "_tune_",
+    "loguniform",
+    0.001,
+    1.0,
+]
+num_leaves = [
+    "_tune_",
+    "int",
+    4,
+    768,
+]
+min_sum_hessian_in_leaf = [
+    "_tune_",
+    "loguniform",
+    0.0001,
+    100.0,
+]
+bagging_fraction = [
+    "_tune_",
+    "uniform",
+    0.5,
+    1.0,
+]
+stopping_rounds = 1000
+device_type = "cpu"
+
+[space.fit]

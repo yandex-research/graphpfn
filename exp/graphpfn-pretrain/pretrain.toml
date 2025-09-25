@@ -1,0 +1,55 @@
+seed = 0
+amp = true
+n_steps = 500000
+epoch_size = 100
+n_lr_warmup_epochs = 100
+gradient_clipping_norm = 1.0
+batch_size = 1
+
+[optimizer]
+type = "AdamW"
+lr = 0.0003
+weight_decay = 0.0
+
+[[evaluation_data]]
+cache = false
+path = "data/tolokers-2"
+setting = "transductive"
+num_policy = "noisy-quantile-normal"
+ratio_policy = "noisy-quantile-uniform"
+cat_policy = "ordinal"
+internal_split_name = "RL"
+
+[[evaluation_data]]
+cache = false
+path = "data/artnet-exp"
+setting = "transductive"
+num_policy = "noisy-quantile-normal"
+ratio_policy = "noisy-quantile-uniform"
+cat_policy = "ordinal"
+internal_split_name = "RL"
+
+[[evaluation_data]]
+cache = false
+path = "data/city-roads-M"
+setting = "transductive"
+num_policy = "noisy-quantile-normal"
+ratio_policy = "noisy-quantile-uniform"
+cat_policy = "ordinal"
+internal_split_name = "RL"
+
+[[evaluation_data]]
+cache = false
+path = "data/artnet-views"
+setting = "transductive"
+num_policy = "noisy-quantile-normal"
+ratio_policy = "noisy-quantile-uniform"
+cat_policy = "ordinal"
+internal_split_name = "RL"
+
+[prior]
+structure_features = true
+nfa = false
+
+[ssl]
+coef_edge = 0.1

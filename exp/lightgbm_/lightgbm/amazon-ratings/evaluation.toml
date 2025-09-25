@@ -1,0 +1,33 @@
+function = "bin.lightgbm_.main"
+n_seeds = 10
+
+[base_config.data]
+cache = false
+path = "data/amazon-ratings"
+setting = "transductive"
+add_self_loops = false
+num_policy = "none"
+external_split = true
+
+[base_config.data.nfa]
+num_modes = [
+    "mean",
+]
+
+[base_config.data.pca.params]
+dim = 1000000
+
+[base_config.model]
+n_estimators = 4000
+n_jobs = 4
+verbose = -1
+feature_fraction = 0.7356709869789205
+lambda_l2 = 0.9838094595071616
+learning_rate = 0.025149918379318473
+num_leaves = 576
+min_sum_hessian_in_leaf = 0.1721351305574086
+bagging_fraction = 0.541427300269072
+stopping_rounds = 1000
+device_type = "cpu"
+
+[base_config.fit]
