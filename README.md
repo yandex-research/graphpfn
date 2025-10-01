@@ -1,6 +1,6 @@
 # GraphPFN
 
-This is the official repository of "GraphPFN: A Prior-Data Fitted Graph Foundation Model" paper. In this repository, we provide code for reproducing our experiments with GraphPFN, both pretraining and evaluation.
+This is the official repository of "GraphPFN: A Prior-Data Fitted Graph Foundation Model" paper ([arXiv](https://arxiv.org/abs/2509.21489v1)). In this repository, we provide code for reproducing our experiments with GraphPFN, both pretraining and evaluation.
 
 ## Licenses
 
