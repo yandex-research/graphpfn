@@ -4,6 +4,7 @@ This is the official repository of "GraphPFN: A Prior-Data Fitted Graph Foundati
 
 ## News
 
+> [!NOTE]
 > GraphPFN-1.2 is out! The next release with refactored code and extended evaluation is also on the way, so stay tuned!
 
 - 2026-02-13: GraphPFN-1.2 released, featuring improved ICL performance, end-to-end dataset generation and more!
@@ -11,7 +12,7 @@ This is the official repository of "GraphPFN: A Prior-Data Fitted Graph Foundati
 
 ## Licenses
 
-This project uses modified versions of third-party components ([TabICL](https://github.com/soda-inria/tabicl) and [LimiX](https://github.com/limix-ldm/LimiX)). See the `NOTICE` file and `LICENSES/` directory for details. LimiX serves as the backbone for GraphPFN, and its weights have a separate license - see the [LimiX repository](https://github.com/limix-ldm/LimiX).
+This project uses modified versions of third-party components ([TabICL](https://github.com/soda-inria/tabicl) and [LimiX](https://github.com/limix-ldm/LimiX)). See the `NOTICE` file and `LICENSES/` directory for details. LimiX serves as the backbone for GraphPFN, and its weights have a separate license - see the LimiX [repository](https://github.com/limix-ldm/LimiX).
 
 ## Reproducing Experiments
 
@@ -22,7 +23,7 @@ This project uses modified versions of third-party components ([TabICL](https://
 ```
 uv sync
 ```
-3. For experiments on [GraphLand](https://github.com/yandex-research/graphland), download datasets and place them in the "data" directory
+3. For experiments on [GraphLand](https://github.com/yandex-research/graphland), download datasets and place them in the `data` directory
 
 **Running the evaluation**
 
