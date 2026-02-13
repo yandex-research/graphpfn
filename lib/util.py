@@ -1,6 +1,5 @@
 import argparse
 import datetime
-import delu
 import enum
 import functools
 import importlib
@@ -10,6 +9,7 @@ import json
 import os
 import shutil
 import statistics
+import subprocess
 import sys
 import tempfile
 import time
@@ -19,18 +19,19 @@ from copy import deepcopy
 from pathlib import Path
 from pprint import pprint
 from typing import Any, TypeVar, cast
-from typing_extensions import NotRequired, TypedDict  # noqa: UP035
 
+import delu
 import numpy as np
 import tomli_w
 import yaml
 from loguru import logger
 from optuna import Study
 from optuna.trial import TrialState
+from typing_extensions import TypedDict  # noqa: UP035
 
 # NOTE: this is internal infrastructure, ignore it
 try:
-    from dev.infra.util import save_snapshot, load_snapshot, init_exp_tracker
+    from dev.infra.util import init_exp_tracker, load_snapshot, save_snapshot
 
     INTERNAL_INFRA = True
 except ImportError:
@@ -113,15 +114,16 @@ T = TypeVar("T")
 
 
 class Checkpoint(TypedDict):
-    run_uid: NotRequired[str]  # internal infrastructure, ignore it
+    run_uid: str | None  # internal infrastructure, ignore it
     step: int
     report: JSONDict
     model: dict[str, Any]
+    model_ema: dict[str, Any]
     optimizer: dict[str, Any]
-    lr_scheduler: dict[str, Any]
+    lr_scheduler: dict[str, Any] | None
     random_state: dict[str, Any]
     timer: delu.tools.Timer
-    extra: NotRequired[dict[str, Any]]
+    extra: dict[str, Any]
 
 
 # TODO: ideally, support all features from original reports
@@ -137,23 +139,25 @@ class Experiment:
     def init_ddp(self, backend="nccl"):
         self.ddp = "RANK" in os.environ
         self.rank = int(os.environ.get("RANK", 0))
+        self.world_size = int(os.environ.get("WORLD_SIZE", 1))
         self.master_process = (not self.ddp) | (self.rank == 0)
 
         if self.ddp:
-            self.device_id = os.environ["LOCAL_RANK"]
+            self.device_id = int(os.environ["LOCAL_RANK"])
             _torch().distributed.init_process_group(backend, rank=self.rank)
             self.sync()
         else:
             self.device_id = 0
 
-    def init_loguru(self, log_master_only: bool = True, level: str = "INFO") -> None:
+    def init_loguru(self, log_master_only: bool = False, level: str = "INFO") -> None:
         logger.remove()
         if self.master_process or not log_master_only:
+            rank = get_rank()
             logger.add(
                 sys.stderr,
-                format="<level>{message}</level>",
+                format=f"<level>[{{level}} {rank=} {{time:HH:mm:ss}}] {{message}}</level>",
                 level=level,
-                enqueue=(not log_master_only),
+                enqueue=True,
             )
 
     def check[T](
@@ -231,7 +235,7 @@ class Experiment:
 
         if should_start:
             checkpoint = self.load_checkpoint() if continue_ else None
-            if self.master_process and exp_tracker:
+            if self.master_process and exp_tracker and INTERNAL_INFRA:
                 self.exp_tracker = init_exp_tracker(
                     self.config, self.output, checkpoint
                 )
@@ -292,11 +296,22 @@ class Experiment:
     def save_checkpoint(self, checkpoint: Checkpoint) -> None:
         self.sync()
         if self.master_process:
+            info = {
+                k: v["score"] for k, v in checkpoint["report"]["metrics"].items()
+            } | {
+                "lr": (
+                    checkpoint["report"]["lr"][0]
+                    if "lr" in checkpoint["report"]
+                    else None
+                ),
+                "loss": (
+                    checkpoint["report"]["loss"]
+                    if "loss" in checkpoint["report"]
+                    else None
+                ),
+            }
+            logger.info(f"{info=}")
             if self.exp_tracker:
-                info = {
-                    k: v["score"] for k, v in checkpoint["report"]["metrics"].items()
-                } | {"lr": checkpoint["report"]["lr"][0]}
-                logger.info(f"{info=}")
                 self.exp_tracker.log(
                     info,
                     step=checkpoint["step"],
@@ -330,7 +345,8 @@ class Experiment:
             _torch().distributed.barrier()
 
     def finish(self) -> None:
-        _mark_as_done(self.output)
+        if self.master_process:
+            _mark_as_done(self.output)
         self.finished = True
 
     def __del__(self):
@@ -484,6 +500,7 @@ def create_report(
     else:
         report = {
             "function": get_function_full_name(function),
+            "commit": get_git_revision_hash(),
             "gpus": get_gpu_names(),
             "config": jsonify(config),
         }
@@ -781,10 +798,66 @@ def print_summary(output: str | Path, *, newline: bool = True) -> None:
 
 
 # ==================================================================================
+# DDP
+# ==================================================================================
+def get_local_rank() -> int:
+    return int(os.environ.get("LOCAL_RANK", 0))
+
+
+def get_rank() -> int:
+    return int(os.environ.get("RANK", 0))
+
+
+def get_world_size() -> int:
+    return int(os.environ.get("WORLD_SIZE", 1))
+
+
+def is_ddp() -> bool:
+    return "RANK" in os.environ
+
+
+def is_master_process() -> bool:
+    return get_rank() == 0
+
+
+def barrier() -> None:
+    if is_ddp():
+        _torch().distributed.barrier()  # type: ignore
+
+
+def broadcast_int(item: int | None) -> int:
+    if not is_ddp():
+        assert item is not None
+        return item
+    item_tensor = _torch().zeros(1, device=get_device(), dtype=_torch().int32)
+    if is_master_process():
+        assert item is not None
+        item_tensor[0] = item
+    _torch().distributed.broadcast(item_tensor, src=0)  # type: ignore
+    item = int(item_tensor.item())
+    return item
+
+
+def allreduce_int(item: int) -> int:
+    if not is_ddp():
+        return item
+    item_tensor = _torch().tensor([item], device=get_device(), dtype=_torch().int32)
+    _torch().distributed.all_reduce(item_tensor)
+    item = int(item_tensor.item())
+    return item
+
+
+def configure_ddp(backend="nccl") -> None:
+    _torch().distributed.init_process_group(backend, rank=get_rank())  # type: ignore
+    barrier()
+
+
+# ==================================================================================
 # CUDA
 # ==================================================================================
-def get_device(rank: int = 0):  # -> torch.device
+def get_device(rank: int | None = None):  # -> torch.device
     torch = _torch()
+    rank = rank or get_local_rank()
     return torch.device(
         f"cuda:{rank}"
         if torch.cuda.is_available()
@@ -862,9 +935,23 @@ def is_failed_trial(study: Study, index: int = -1) -> bool:
 # ==================================================================================
 # Other
 # ==================================================================================
-def configure_logging():
+def get_git_revision_hash() -> str:
+    return subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("ascii").strip()
+
+
+def random_float(a: float, b: float) -> float:
+    assert a <= b
+    return a + (b - a) * np.random.rand()
+
+
+def configure_logging(enqueue: bool = False):
     logger.remove()
-    logger.add(sys.stderr, format="<level>{message}</level>")
+    rank = get_rank()
+    logger.add(
+        sys.stderr,
+        format=f"<level>[{{level}} {rank=} {{time:HH:mm:ss}}] {{message}}</level>",
+        enqueue=enqueue,
+    )
 
 
 def configure_torch(deterministic: bool = True):

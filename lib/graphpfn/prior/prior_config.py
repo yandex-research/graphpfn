@@ -1,6 +1,5 @@
 from .activations import get_activations
 
-
 DEFAULT_FIXED_HP = {
     # SCMPrior
     "mix_probs": (0.7, 0.3),
@@ -25,6 +24,12 @@ DEFAULT_SAMPLED_HP = {
         "choice_values": ["value", "rank"],
     },
     # GNNSCM
+    "mlp_dropout_prob": {
+        "distribution": "meta_beta",
+        "scale": 0.9,
+        "min": 0.1,
+        "max": 5.0,
+    },
     "mlp_activations": {
         "distribution": "meta_choice_mixed",
         "choice_values": get_activations(random=True, scale=True, diverse=True),
@@ -32,20 +37,6 @@ DEFAULT_SAMPLED_HP = {
     "block_wise_dropout": {
         "distribution": "meta_choice",
         "choice_values": [True, False],
-    },
-    "conv_type": {
-        "distribution": "meta_choice",
-        "choice_values": ["gcn", "sage-mean", "sage-min", "sage-max", "gt"],
-    },
-    "graph_conv_ratio": {
-        "distribution": "meta_choice",
-        "choice_values": [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
-    },
-    "mlp_dropout_prob": {
-        "distribution": "meta_beta",
-        "scale": 0.9,
-        "min": 0.1,
-        "max": 5.0,
     },
     # GNNSCM and TreeSCM
     "is_causal": {"distribution": "meta_choice", "choice_values": [True, False]},

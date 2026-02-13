@@ -20,8 +20,8 @@ def get_activation_module(activation: str) -> nn.Module:
 class ResidualModule(nn.Module):
     def __init__(
         self,
-        base_class: nn.Module,
-        norm_class: nn.Module,
+        base_class: type[nn.Module],
+        norm_class: type[nn.Module],
         d_hidden: int,
         *,
         residual: bool = True,

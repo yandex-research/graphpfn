@@ -2,14 +2,19 @@ from __future__ import annotations
 
 import math
 import random
-from typing import Dict, Any
+from functools import partial
+from typing import Any, Dict
 
 import dgl
 import numpy as np
 import torch
-from torch import nn
+from loguru import logger
+from scipy.sparse.linalg import ArpackNoConvergence
+from sklearn.preprocessing import QuantileTransformer
+from torch import Tensor, nn
 
-from .utils import GaussianNoise, XSampler, SemiGraphConv
+from ...graph.structure_encodings import compute_pagerank
+from .utils import GaussianNoise, SemiGraphConv, XSampler
 
 
 class GNNSCM(nn.Module):
@@ -125,10 +130,16 @@ class GNNSCM(nn.Module):
 
     def __init__(
         self,
-        graph_info: dict[str, Any],
+        *,
+        graph: dgl.DGLGraph,
+        graph_sampler_type_list: list[str],
         conv_type: str = "GraphSAGE",
         graph_conv_ratio: float = 1.0,
-        structure_features_flag: bool = False,
+        avg_degree: float,
+        n_lappe_features: int = 0,
+        degree_features: bool = False,
+        pagerank_features: bool = False,
+        transform_strucfeat_config: dict | None = None,  # TODO: maybe rename?
         seq_len: int = 1024,
         num_features: int = 100,
         num_outputs: int = 1,
@@ -152,6 +163,8 @@ class GNNSCM(nn.Module):
         **kwargs: Dict[str, Any],
     ):
         super().__init__()
+
+        self.graph = graph
 
         self.seq_len = seq_len
         self.num_features = num_features
@@ -179,8 +192,10 @@ class GNNSCM(nn.Module):
 
         self.conv_type = conv_type
         self.graph_conv_ratio = graph_conv_ratio
-        self.structure_features_flag = structure_features_flag
-        self.graph = self.load_graph(graph_info)
+        self.n_lappe_features = n_lappe_features
+        self.degree_features = degree_features
+        self.pagerank_features = pagerank_features
+        self.transform_strucfeat_config = transform_strucfeat_config
 
         if self.is_causal:
             # Ensure enough intermediate variables for sampling X and y
@@ -192,9 +207,13 @@ class GNNSCM(nn.Module):
             self.num_causes = self.num_features
 
         # Define the input sampler
-        self.xsampler = XSampler(
-            self.seq_len,
-            self.num_causes,
+        # NOTE: seq_len can slightly change since generating *connected* graphs with
+        #       exactly given number of nodes is non-trivial, so we only select the
+        #       largest connected component, which might be smaller than seq_len.
+        #       So, we need to create new xsampler for each forward pass.
+        self.xsampler = partial(
+            XSampler,
+            num_features=self.num_causes,
             pre_stats=self.pre_sample_cause_stats,
             sampling=self.sampling,
             device=self.device,
@@ -203,11 +222,11 @@ class GNNSCM(nn.Module):
         # Build layers
         num_inputs = (
             self.num_causes
-            if not structure_features_flag
-            else self.num_causes
-            + 17  # TODO: do not fix this to something, use config instead
+            + self.n_lappe_features
+            + int(degree_features)
+            + int(pagerank_features)
         )
-        layers = [nn.Linear(num_inputs, self.hidden_dim)]
+        layers: list[nn.Module] = [nn.Linear(num_inputs, self.hidden_dim)]
         for _ in range(self.num_layers - 1):
             layers.append(self.generate_layer_modules())
         if not self.is_causal:
@@ -217,30 +236,14 @@ class GNNSCM(nn.Module):
         # Initialize layers
         self.initialize_parameters()
 
-    def load_graph(self, graph_info: dict[str, Any]) -> dgl.DGLGraph:
-        num_nodes = graph_info["num_nodes"]
-        graph_path = graph_info["path"]
-
-        edge_list = np.load(f"{graph_path}/edgelist.npy")
-        src, dst = edge_list[:, 0], edge_list[:, 1]
-        graph = dgl.graph((src, dst), num_nodes=num_nodes)
-
-        graph = dgl.remove_self_loop(graph)
-        graph = dgl.to_simple(graph)
-        graph = dgl.to_bidirected(graph)
-
-        return graph.to(self.device)
-
     def generate_layer_modules(self, is_output_layer=False):
         """Generates a layer module with activation, linear transformation, and noise."""
         out_dim = self.num_outputs if is_output_layer else self.hidden_dim
         activation = self.mlp_activations()
-        # linear_layer = nn.Linear(self.hidden_dim, out_dim)
-        linear_layer = SemiGraphConv(
-            graph=self.graph,
+        linear_layer = SemiGraphConv(  # TODO: rename
             d_input=self.hidden_dim,
             d_output=out_dim,
-            conv_type=self.conv_type,
+            conv_type=self.conv_type,  # type: ignore
             graph_conv_ratio=self.graph_conv_ratio,
         )
 
@@ -294,28 +297,69 @@ class GNNSCM(nn.Module):
             nn.init.normal_(param, std=std)
             param *= torch.bernoulli(torch.full_like(param, 1 - dropout_prob))
 
-    def compupte_structure_features(self):
-        graph = self.graph
-        return torch.cat(
-            [
-                dgl.lap_pe(graph, k=16).to(graph.device),
-                torch.log(1 + graph.in_degrees())[:, None].to(graph.device),
-            ],
-            dim=1,
+    def transform_strucfeat(self, feat: Tensor) -> Tensor:
+        if self.transform_strucfeat_config is None:
+            return feat
+        output_distribution = self.transform_strucfeat_config["output_distribution"]
+        scaling_factor = self.transform_strucfeat_config["scaling_factor"]
+        transformer = QuantileTransformer(
+            output_distribution=output_distribution,
+            n_quantiles=min(feat.shape[0], 1000),
         )
+        feat = torch.tensor(transformer.fit_transform(feat.cpu().numpy()))
+        feat = scaling_factor * feat
+        return feat
+
+    def compute_lappe_features(self, graph: dgl.DGLGraph) -> Tensor:
+        try:
+            lappe = dgl.lap_pe(graph, k=self.n_lappe_features).to(graph.device)  # type: ignore
+        except ArpackNoConvergence:
+            lappe = torch.randn(
+                [graph.num_nodes(), self.n_lappe_features], device=graph.device
+            )
+            logger.warning(
+                "LapPE did not converge. Replacing LapPE with random values."
+            )
+        lappe = self.transform_strucfeat(lappe)
+        return lappe
+
+    def compute_degree_features(self, graph: dgl.DGLGraph) -> Tensor:
+        degrees = graph.in_degrees().unsqueeze(-1)
+        degrees = torch.log(1 + degrees)
+        degrees = self.transform_strucfeat(degrees)
+        return degrees
+
+    def compute_pagerank_features(self, graph: dgl.DGLGraph) -> Tensor:
+        alpha = 0.6 + 0.3 * np.random.rand()
+        pagerank = compute_pagerank(graph, alpha=alpha, log=True, max_iterations=30)
+        pagerank = self.transform_strucfeat(pagerank)
+        return pagerank
 
     def forward(self):
         """Generates synthetic data by sampling input features and applying MLP transformations."""
-        causes = self.xsampler.sample()  # (seq_len, num_causes)
+        graph = self.graph
+        causes = self.xsampler(graph.num_nodes()).sample()  # (seq_len, num_causes)
 
-        # Generate outputs through MLP layers
-        inputs = (
-            causes
-            if not self.structure_features_flag
-            else torch.cat([causes, self.compupte_structure_features()], dim=1)
-        )
+        # `ndata` contains additional info (like clusters in SBM or coordinates in
+        # geometric graphs) for dataset generation. But this info is not available
+        # during evaluation. So we drop it in order to alleviate data leak.
+        for key in list(graph.ndata.keys()):
+            graph.ndata.pop(key)
+
+        inputs = [causes]
+        if self.n_lappe_features > 0:
+            inputs.append(self.compute_lappe_features(graph))
+        if self.degree_features:
+            inputs.append(self.compute_degree_features(graph))
+        if self.pagerank_features:
+            inputs.append(self.compute_pagerank_features(graph))
+        inputs = torch.cat(inputs, dim=1)  # type: ignore
+
         outputs = [inputs]
         for layer in self.layers:
+            for module in layer.modules():
+                if isinstance(module, SemiGraphConv):
+                    module.graph = graph
             outputs.append(layer(outputs[-1]))
         outputs = outputs[
             2:
@@ -332,7 +376,7 @@ class GNNSCM(nn.Module):
         if self.num_outputs == 1:
             y = y.squeeze(-1)
 
-        return self.graph, X, y
+        return X.cpu(), y.cpu()
 
     def handle_outputs(self, causes, outputs):
         """

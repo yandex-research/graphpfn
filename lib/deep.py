@@ -13,7 +13,6 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.nn import Parameter
 
-
 from .util import TaskType, is_oom_exception
 
 
@@ -1284,6 +1283,35 @@ def get_lr(optimizer: torch.optim.Optimizer) -> float:
 def set_lr(optimizer: torch.optim.Optimizer, lr: float) -> None:
     for group in optimizer.param_groups:
         group["lr"] = lr
+
+
+def get_lr_scheduler(
+    optimizer: torch.optim.Optimizer,
+    n_warmup_steps: int,
+    n_steps: int,
+    scheduler: Literal["none", "cosine"],
+) -> torch.optim.lr_scheduler.LRScheduler:
+    warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+        optimizer, start_factor=0.01, total_iters=n_warmup_steps
+    )
+    if scheduler == "cosine":
+        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, n_steps - n_warmup_steps
+        )
+    elif scheduler == "none":
+        lr_scheduler = torch.optim.lr_scheduler.ConstantLR(
+            optimizer, factor=1.0, total_iters=n_steps - n_warmup_steps
+        )
+    else:
+        raise NotImplementedError(f"Unknown scheduler {scheduler}")
+    return torch.optim.lr_scheduler.SequentialLR(
+        optimizer,
+        [
+            warmup_scheduler,
+            lr_scheduler,
+        ],
+        milestones=[n_warmup_steps],
+    )
 
 
 # ======================================================================================

@@ -16,6 +16,6 @@ def load_tfm(
             local_dir="./checkpoints",
             cache_dir="./checkpoints",
         )
-        return lib.limix.utils.loading.load_model(model_path=model_path)
+        return lib.limix.utils.loading.load_model(model_path=model_path, **tfm_config)
     else:
         raise ValueError(f"{tfm_name} is not found")

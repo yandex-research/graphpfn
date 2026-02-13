@@ -12,17 +12,27 @@ import sklearn.impute
 import sklearn.preprocessing
 import torch
 import yaml
-from ogb.nodeproppred import DglNodePropPredDataset as OGBDataset
 from loguru import logger
-from sklearn.decomposition import PCA, KernelPCA
+from ogb.nodeproppred import DglNodePropPredDataset as OGBDataset
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.decomposition import (
+    NMF,
+    PCA,
+    FastICA,
+    KernelPCA,
+    LatentDirichletAllocation,
+    SparsePCA,
+)
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import OrdinalEncoder
+from sklearn.random_projection import GaussianRandomProjection, SparseRandomProjection
 from torch import Tensor
 from torch_geometric import datasets as pyg_datasets
 from torch_geometric.data import Data as PygData
 
 from lib.data import _SCORE_SHOULD_BE_MAXIMIZED
-from lib.graph.util import Setting
 from lib.graph import structure_encodings
+from lib.graph.util import Setting
 from lib.metrics import calculate_metrics as calculate_metrics_
 from lib.util import DATA_PARTS, PartKey, PredictionType, Score, TaskType
 
@@ -41,6 +51,7 @@ class GraphLandInfo(TypedDict):
     has_nans_in_num_features: bool
 
 
+# TODO: move all this stuff to lib/constants.toml
 GRAPHLAND_DATASETS = [
     "tolokers-2",
     "city-reviews",
@@ -74,9 +85,31 @@ PYG_DATASETS = [
     "lastfm-asia",
     "facebook",
     "wiki-cs",
+    "full-cora",
+    "dblp",
+    "wiki",
+    "reddit",
+    "air-brazil",
+    "air-europe",
+    "air-usa",
+    "actor",
+    "blog-catalog",
+    "deezer",
+    "flickr",
 ]
 
-OGB_DATASETS = ["ogbn-arxiv", "ogbn-products"]
+OGB_DATASETS = [
+    "ogbn-arxiv",
+    "ogbn-products",
+]
+
+HETEROPHILOUS_DATASETS = [
+    "cornell",
+    "texas",
+    "wisconsin",
+    "chameleon",
+    "squirrel",
+]
 
 MULTICLASS_DATASETS = [
     "browser-games",
@@ -98,6 +131,21 @@ MULTICLASS_DATASETS = [
     "pokec-regions",
     "web-topics",
     "wiki-cs",
+    "full-cora",
+    "dblp",
+    "wiki",
+    "reddit",
+    "cornell",
+    "texas",
+    "wisconsin",
+    "chameleon",
+    "squirrel",
+    "air-brazil",
+    "air-europe",
+    "air-usa",
+    "actor",
+    "blog-catalog",
+    "flickr",
 ]
 
 BINCLASS_DATASETS = [
@@ -110,6 +158,7 @@ BINCLASS_DATASETS = [
     "city-reviews",
     "artnet-exp",
     "web-fraud",
+    "deezer",
 ]
 
 REGRESSION_DATASETS = [
@@ -146,6 +195,22 @@ HETEROGENEOUS_DATASETS = [
 ]
 
 
+# TODO: maybe move somewhere else
+class RandomFeatureSelector(BaseEstimator, TransformerMixin):
+    def __init__(self, n_components, random_state=None):
+        self.n_components = n_components
+        self.random_state = random_state
+
+    def fit(self, X, y=None):
+        rng = np.random.RandomState(self.random_state)
+        n_features = X.shape[1]
+        self.indices_ = rng.choice(n_features, size=self.n_components, replace=False)
+        return self
+
+    def transform(self, X):
+        return X[:, self.indices_]
+
+
 def load_dict(path: str | Path) -> dict:
     path = Path(path)
     with path.open() as file:
@@ -167,9 +232,9 @@ class GraphData(TypedDict):
     graph: dgl.DGLGraph
     labels: np.ndarray
     masks: dict[PartKey, np.ndarray]
-    num_features: np.ndarray  # require scaling
-    cat_features: None | np.ndarray  # require encoding
-    ratio_features: None | np.ndarray  # do not require any processing
+    num_features: np.ndarray | None  # require scaling
+    cat_features: np.ndarray | None  # require encoding
+    ratio_features: np.ndarray | None  # do not require any processing
 
 
 def _load_graphland_data(
@@ -274,6 +339,7 @@ def _load_pyg_data(
     path: str | Path,
     *,
     external_split: bool = True,
+    external_split_name: str = "split.npz",
     internal_split_index: None | int = None,
     **kwargs,
 ) -> GraphData:
@@ -313,6 +379,33 @@ def _load_pyg_data(
     elif name == "wiki-cs":
         dataset_ = pyg_datasets.WikiCS(root=root_)
 
+    elif name == "full-cora":
+        dataset_ = pyg_datasets.CitationFull(name="Cora", root=root_)
+
+    elif name == "dblp":
+        dataset_ = pyg_datasets.CitationFull(name="DBLP", root=root_)
+
+    elif name == "wiki":
+        dataset_ = pyg_datasets.AttributedGraphDataset(name="Wiki", root=root_)
+
+    elif name == "reddit":
+        dataset_ = pyg_datasets.Reddit(root=root_)
+
+    elif name in ["air-brazil", "air-europe", "air-usa"]:
+        dataset_ = pyg_datasets.Airports(name=name.split("-")[1], root=root_)
+
+    elif name == "actor":
+        dataset_ = pyg_datasets.Actor(root=root_)
+
+    elif name == "blog-catalog":
+        dataset_ = pyg_datasets.AttributedGraphDataset(name="BlogCatalog", root=root_)
+
+    elif name == "deezer":
+        dataset_ = pyg_datasets.DeezerEurope(root=root_)
+
+    elif name == "flickr":
+        dataset_ = pyg_datasets.Flickr(root=root_)
+
     else:
         raise ValueError(f"Unknown {name=}")
 
@@ -331,7 +424,7 @@ def _load_pyg_data(
     )
 
     if external_split:
-        split_path = path / "split.npz"
+        split_path = path / external_split_name
         split_masks = np.load(split_path, allow_pickle=True)
         masks: dict[PartKey, np.ndarray] = {
             part: split_masks[part] for part in DATA_PARTS
@@ -392,7 +485,8 @@ def _load_pyg_data(
 def _load_ogb_data(
     path: str | Path,
     *,
-    external_split: str = False,
+    external_split: bool = False,
+    external_split_name: str = "split.npz",
     **kwargs,
 ) -> GraphData:
     del kwargs
@@ -437,6 +531,66 @@ def _load_ogb_data(
     return cast(GraphData, graph_data)
 
 
+def _load_heterophilous_dataset(
+    path: str | Path,
+    *,
+    external_split: bool = False,
+    external_split_name: str = "split.npz",
+    **kwargs,
+) -> GraphData:
+    path = Path(path)
+    name = path.name
+    filename = {
+        "cornell": "cornell",
+        "texas": "texas_4_classes",
+        "wisconsin": "wisconsin",
+        "chameleon": "chameleon_filtered",
+        "squirrel": "squirrel_filtered",
+    }[name]
+    path = path / f"{filename}.npz"
+
+    if not path.exists():
+        url = (
+            "https://raw.githubusercontent.com/"
+            f"yandex-research/heterophilous-graphs/main/data/{filename}.npz"
+        )
+        raise NotImplementedError(f"Download {url=} to {path=}")
+    data = np.load(path)
+
+    features = data["node_features"]
+    labels = data["node_labels"]
+
+    bad_labels_mask = np.zeros_like(labels, dtype=np.bool)
+    for label, cnt in zip(*np.unique(labels, return_counts=True)):
+        if cnt == 1:
+            bad_labels_mask |= labels == label
+    labels = labels.astype(np.float32)
+    labels[bad_labels_mask] = np.nan
+    ordinal_encoder = OrdinalEncoder()
+    labels = ordinal_encoder.fit_transform(labels[:, None])[:, 0]
+
+    assert external_split
+    masks = dict(np.load(path.parent / external_split_name))
+
+    edges = torch.tensor(data["edges"])
+    graph = dgl.graph(
+        (edges[:, 0], edges[:, 1]), num_nodes=features.shape[0], idtype=torch.int
+    )
+
+    _mask_labeled_nodes(labels, masks)
+
+    graph_data = {
+        "name": name,
+        "graph": graph,
+        "labels": labels,
+        "masks": masks,
+        "num_features": features,
+        "cat_features": None,
+        "ratio_features": None,
+    }
+    return cast(GraphData, graph_data)
+
+
 def load_data(path: str | Path, **data_params) -> GraphData:
     """
     Load data, drop constant categorical features,
@@ -454,6 +608,9 @@ def load_data(path: str | Path, **data_params) -> GraphData:
 
     elif name in OGB_DATASETS:
         _load_data_fn = _load_ogb_data
+
+    elif name in HETEROPHILOUS_DATASETS:
+        _load_data_fn = _load_heterophilous_dataset
 
     else:
         raise ValueError(f"Unknown {name=}")
@@ -601,11 +758,17 @@ class GraphDataset(Generic[T]):  # noqa: UP046
 
     @classmethod
     def from_dir(
-        cls, path: str | Path, setting: str | Setting, **data_params
+        cls,
+        path: str | Path,
+        setting: str | Setting,
+        score: Score | str | None = None,
+        **data_params,
     ) -> "GraphDataset[np.ndarray]":
         data = load_data(path, **data_params)
         task_type = _get_task_type(data["name"])
-        score = _get_score(task_type)
+        if score is None:
+            score = _get_score(task_type)
+        score = Score(score)
         task = GraphTask(
             labels=data["labels"],
             masks=data["masks"],
@@ -622,7 +785,7 @@ class GraphDataset(Generic[T]):  # noqa: UP046
         graph: dgl.DGLGraph,
         features: dict[str, np.ndarray],  # TODO: str -> FeatureType
         labels: np.ndarray,
-        masks: np.ndarray,
+        masks: dict[str, np.ndarray],
         task_type: str | TaskType,
         setting: str | Setting = "transductive",
     ) -> "GraphDataset[np.ndarray]":
@@ -686,6 +849,10 @@ class GraphDataset(Generic[T]):  # noqa: UP046
             if self.is_heterogeneous
             else self.n_num_features
         )
+
+    @property
+    def n_edges(self) -> int:
+        return self.data["graph"].num_edges()
 
     def compute_cat_cardinalities(self) -> list[int]:
         cat_features = self.data.get("cat_features")
@@ -942,17 +1109,24 @@ def _nfa_reduce(
     x: np.ndarray,
     *,
     mode: Literal["mean", "max", "min"],
-    weights: list[float],
+    weights_list: list[list[float]],
 ) -> np.ndarray:
-    x_reduced = [x]
-    for hop in range(1, len(weights)):
-        x_reduced.append(_nfa_reduce_single_hop(g, x, mode=mode, hop=hop))
-    return (np.array(weights) * np.stack(x_reduced, axis=-1)).sum(-1).astype(np.float32)
+    nfa = []
+    for weights in weights_list:
+        x_reduced = [x]
+        for hop in range(1, len(weights)):
+            x_reduced.append(_nfa_reduce_single_hop(g, x, mode=mode, hop=hop))
+        nfa.append(
+            (np.array(weights) * np.stack(x_reduced, axis=-1))
+            .sum(-1)
+            .astype(np.float32)
+        )
+    return np.concatenate(nfa, axis=-1)
 
 
 def apply_nfa(
     dataset: GraphDataset,
-    weights: list[float] = [0.0, 1.0],
+    weights_list: list[list[float]] = [[0.0, 1.0]],
     num_modes: list[str] = ["mean", "max", "min"],
 ) -> dict[str, np.ndarray | None]:
     nfa: dict[str, list[Tensor]] = {"num_features": [], "ratio_features": []}
@@ -962,14 +1136,20 @@ def apply_nfa(
         for mode in num_modes:
             nfa["num_features"].append(
                 _nfa_reduce(
-                    graph, dataset.data["num_features"], mode=mode, weights=weights
+                    graph,
+                    dataset.data["num_features"],
+                    mode=mode,
+                    weights_list=weights_list,
                 )
             )
 
     if dataset.data["ratio_features"] is not None:
         nfa["ratio_features"].append(
             _nfa_reduce(
-                graph, dataset.data["ratio_features"], mode="mean", weights=weights
+                graph,
+                dataset.data["ratio_features"],
+                mode="mean",
+                weights_list=weights_list,
             )
         )
 
@@ -979,7 +1159,7 @@ def apply_nfa(
             cat_features, dataset.data["masks"], dataset.task.setting, "one-hot"
         )
         nfa_cat_features = _nfa_reduce(
-            graph, cat_features, mode="mean", weights=weights
+            graph, cat_features, mode="mean", weights_list=weights_list
         )
         nfa["ratio_features"].append(nfa_cat_features)
 
@@ -992,10 +1172,11 @@ def apply_nfa(
     return nfa
 
 
+# TODO: rename to compress or like that? If we support PCA, NMF, LDA and others
 def apply_pca(
     dataset: GraphDataset,
     features_dict: dict[str, np.ndarray | None],
-    dim: int | str,
+    dim: int | Literal["same"],
     mode: str = "PCA",
     apply_random_orth: bool = False,
     postprocess: NumPolicy | str = NumPolicy.NONE,
@@ -1043,9 +1224,9 @@ def apply_pca(
     # This comes from the fact that the first feature in this dataset is
     # essentially binary indicator, so while applying PCA to a text embedding is ok,
     # applying it to the pair (binary indicator, embedding) seems to work bad
-    if dataset.data["name"] == "questions":
-        assert len(np.unique(features[:, 0])) == 2, (
-            "This feature for questions dataset should be binary."
+    if dataset.data["name"] == "questions":  # TODO: maybe change this
+        assert len(np.unique(features[:, 0])) in [2, 602], (
+            "This feature for questions dataset should be binary or NFA of binary."
         )
         features = features[:, 1:]
 
@@ -1054,8 +1235,17 @@ def apply_pca(
 
     pca = {
         "PCA": partial(PCA, n_components=dim),
+        "NMF": partial(NMF, n_components=dim),
+        "LDA": partial(LatentDirichletAllocation, n_components=dim),
+        "SRP": partial(SparseRandomProjection, n_components=dim),
+        "GRP": partial(GaussianRandomProjection, n_components=dim),
+        "SparsePCA": partial(SparsePCA, n_components=dim),
+        "FastICA": partial(FastICA, n_components=dim),
         "KernelPCA": partial(KernelPCA, kernel="rbf", n_components=dim),
+        "RandomFeatureSelector": partial(RandomFeatureSelector, n_components=dim),
     }[mode]()
+    if mode in ["NMF", "LDA"]:  # some datasets have column-normalized TF-IDF features
+        features = features - features.min(axis=0, keepdims=True)
     features = pca.fit_transform(features)
 
     if apply_random_orth:
@@ -1096,6 +1286,7 @@ def merge_features(
     return merged_features
 
 
+# TODO: rename to structure features
 def compute_graph_encodings(
     dataset: GraphDataset,
     config: dict,
@@ -1107,7 +1298,7 @@ def compute_graph_encodings(
     for method, method_kwargs in config.items():
         if method == "preprocess":
             continue
-        func = {
+        func = {  # TODO: not sure we need all of this
             "random_walk_pe": dgl.random_walk_pe,
             "lap_pe": dgl.lap_pe,
             "svd_pe": dgl.svd_pe,
@@ -1136,7 +1327,7 @@ def compute_graph_encodings(
 def build_dataset(
     path: str | Path | None,
     *,
-    dataset: GraphDataset | None = None,
+    dataset: GraphDataset | None = None,  # TODO: move preprocessing into separate func
     seed: int = 0,
     cache: bool = False,
     num_policy: None | str | NumPolicy = None,
@@ -1182,7 +1373,7 @@ def build_dataset(
         )
         if (pca is not None) and pca.get("apply_before_merge", True):
             new_features = apply_pca(dataset, features, **pca["params"])
-            for key in feature_types:
+            for key in feature_types:  # TODO: refactor
                 new_value = new_features.get(key, None)
                 features.pop(key)
                 features[key] = new_value

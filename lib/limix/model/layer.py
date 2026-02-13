@@ -141,7 +141,7 @@ class MultiheadAttention(torch.nn.Module):
         q:torch.Tensor|None,
         kv:torch.Tensor|None,
         attn_mask:torch.Tensor|None,
-        batch_size:int=512,
+        batch_size:int=2 ** 15,
     ) -> torch.Tensor:
         '''TODO'''
         if qkv is not None:
@@ -153,19 +153,23 @@ class MultiheadAttention(torch.nn.Module):
         assert q is not None and k is not None and v is not None, "q, k, and v must not be None"
         q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
         attention_outputs = []
-        q_len = q.shape[2]
-        for start in range(0, q_len, batch_size):
-            end = min(start + batch_size, q_len)
-            q_batch = q[:, :, start:end, :]
+        n = q.shape[0]
+        assert (k.shape[0] == n) and (v.shape[0] == n)
+        for start in range(0, n, batch_size):
+            end = min(start + batch_size, n)
             if attn_mask is not None:
-                attn_mask_batch = attn_mask[..., start:end, :]
+                attn_mask_batch = attn_mask[start:end, ...]
             else:
                 attn_mask_batch = None
             out_batch = torch.nn.functional.scaled_dot_product_attention(
-                q_batch, k, v, attn_mask=attn_mask_batch, dropout_p=self.dropout
+                q[start:end, ...],
+                k[start:end, ...],
+                v[start:end, ...],
+                attn_mask=attn_mask_batch,
+                dropout_p=self.dropout,
             )
             attention_outputs.append(out_batch)
-        attention_outputs = torch.cat(attention_outputs, dim=-2)
+        attention_outputs = torch.cat(attention_outputs, dim=0)
         attention_outputs = attention_outputs.transpose(1, 2)
         return attention_outputs
     

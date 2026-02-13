@@ -56,10 +56,21 @@ def main(
     elif config.name == "evaluation.toml":
         evaluation_config_path = config
 
+    elif config.name == "pretrain.toml":
+        pretrain_config = lib.load_config(config)
+        function = lib.import_(pretrain_config["function"])
+        function(
+            pretrain_config["base_config"],
+            force=force,
+            continue_=continue_,
+            output=config.with_suffix(""),
+        )
+        return
+
     else:
         raise ValueError(
-            'The config name must be either "tuning.toml" or "evaluation.toml".'
-            f" However: {config.name=}"
+            'The config name must be either "tuning.toml", "evaluation.toml"'
+            f' or "evaluation.toml". However: {config.name=}'
         )
 
     bin.evaluate.main(evaluation_config_path, continue_=continue_, force=force)

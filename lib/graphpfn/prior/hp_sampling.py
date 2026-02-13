@@ -15,10 +15,16 @@ where the parameters of a distribution are themselves sampled from another distr
 from __future__ import annotations
 
 import math
+import random
+
 import numpy as np
 import scipy.stats as stats
 import torch
 import torch.nn as nn
+
+
+def choice_sampler(choice_values):
+    return lambda: random.choice(choice_values)
 
 
 def trunc_norm_sampler(mu, sigma):
@@ -33,6 +39,11 @@ def beta_sampler(a, b):
     return lambda: np.random.beta(a, b)
 
 
+def loc_scaled_beta_sampler(a, b, loc, scale):
+    """Creates a sampler for beta distribution with shape parameters a and b."""
+    return lambda: loc + scale * np.random.beta(a, b)
+
+
 def gamma_sampler(a, b):
     """Creates a sampler for gamma distribution with shape parameter a and scale parameter b."""
     return lambda: np.random.gamma(a, b)
@@ -43,9 +54,36 @@ def uniform_sampler(a, b):
     return lambda: np.random.uniform(a, b)
 
 
+def log_uniform_sampler(a, b):
+    """Creates a sampler for log-uniform distribution between a and b."""
+    return lambda: np.exp(np.random.uniform(np.log(a), np.log(b))).item()
+
+
+def mixed_log_uniform_sampler(min_first, max_first, min_second, max_second, p_first):
+    """Creates a sampler for log-uniform distribution between a and b."""
+    return lambda: (
+        np.exp(np.random.uniform(np.log(min_first), np.log(max_first))).item()
+        if np.random.random() < p_first
+        else np.exp(np.random.uniform(np.log(min_second), np.log(max_second))).item()
+    )
+
+
+# TODO: is this really uniform?
 def uniform_int_sampler(a, b):
     """Creates a sampler for uniform integer distribution between a and b."""
     return lambda: round(np.random.uniform(a, b))
+
+
+def uniform_int_with_default_sampler(
+    a: int,
+    b: int,
+    default: int,
+    p_default: float,
+):
+    """Creates a sampler for uniform int in [a, b) or returns default with probability p_default"""
+    return (
+        lambda: default if (np.random.rand() < p_default) else np.random.randint(a, b)
+    )
 
 
 class HpSampler(nn.Module):
@@ -81,12 +119,30 @@ class HpSampler(nn.Module):
     def initialize_distribution(self):
         if self.distribution.startswith("meta"):
             self.initialize_meta_distribution()
+        elif self.distribution == "choice":
+            self.sampler = choice_sampler(self.choice_values)
         elif self.distribution == "uniform":
             self.sampler = uniform_sampler(self.min, self.max)
+        elif self.distribution == "log_uniform":
+            self.sampler = log_uniform_sampler(self.min, self.max)
+        elif self.distribution == "mixed_log_uniform":
+            self.sampler = mixed_log_uniform_sampler(
+                self.min_first,
+                self.max_first,
+                self.min_second,
+                self.max_second,
+                self.p_first,
+            )
         elif self.distribution == "beta":
             self.sampler = beta_sampler(self.a, self.b)
+        elif self.distribution == "loc_scaled_beta":
+            self.sampler = loc_scaled_beta_sampler(self.a, self.b, self.loc, self.scale)
         elif self.distribution == "uniform_int":
             self.sampler = uniform_int_sampler(self.min, self.max)
+        elif self.distribution == "uniform_int_with_default":
+            self.sampler = uniform_int_with_default_sampler(
+                self.min, self.max, self.default, self.p_default
+            )
         else:
             raise ValueError(f"Unsupported distribution: {self.distribution}")
 

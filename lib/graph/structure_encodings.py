@@ -1,12 +1,12 @@
 import random
-import networkx as nx
-from collections import deque, defaultdict
+from collections import defaultdict, deque
 from math import log
-from sklearn.decomposition import PCA
 
 import dgl
+import networkx as nx
 import numpy as np
 import torch
+from sklearn.decomposition import PCA
 
 # >>> utils
 
@@ -145,6 +145,7 @@ def compute_instant_embedding(
 
     graph_adj = convert_to_adj_matrix(graph)
 
+    # TODO: optimize via multiprocessing?
     embedding = [
         node_instant_embedding(
             graph=graph_adj,
@@ -159,7 +160,12 @@ def compute_instant_embedding(
 
     embedding = np.array(embedding)
 
-    if pca_dim is not None:
+    if pca_dim is not None:  # TODO: do not duplicate
+        # embedding = np.where(
+        #     embedding.std(0) > 0,
+        #     (embedding - embedding.mean(0)) / embedding.std(0),
+        #     0,
+        # )
         embedding = embedding - embedding.mean(0)
         embedding = PCA(pca_dim).fit_transform(embedding)
 
@@ -191,11 +197,11 @@ def compute_pagerank(
     train_index=None,
     log: bool = True,
 ):
-    assert alpha > 0.5, "Please make sure that you provde alpha, not 1-alpha"
+    assert alpha >= 0.5, "Please make sure that you provde alpha, not 1-alpha"
     g = graph
     # Initialize node features
     n_nodes = g.num_nodes()
-    pv = torch.ones(n_nodes) / n_nodes
+    pv = torch.ones(n_nodes, device=graph.device) / n_nodes
     degrees = g.out_degrees().float()
 
     # Personalization vector (uniform)
@@ -227,8 +233,15 @@ def compute_pagerank(
     return pv[..., None]
 
 
+# TODO: unify naming
 def clustering_coefficient(graph):
+    # TODO: thats actually number of triangles, not clustering coef
+    # TODO: do not auto-compute on cuda
     raise NotImplementedError()
+    return torch.diagonal(dgl.khop_adj(graph.to("cuda"), 3))[..., None]
+    # graph = nx.Graph(graph.to_networkx())
+    # clustering = nx.clustering(graph)
+    # return torch.tensor([clustering[i] for i in range(graph.number_of_nodes())])[..., None]
 
 
 def betweenness_centrality(graph):

@@ -7,7 +7,10 @@ from typing import Literal
 import dgl
 import numpy as np
 import torch
+from loguru import logger
 from torch import nn
+
+import lib.util
 
 
 class GaussianNoise(nn.Module):
@@ -199,6 +202,7 @@ class GTConv(nn.Module):
         x: torch.Tensor,
     ) -> torch.Tensor:
         assert x.ndim == 2, "Batching is not supported yet"
+        graph = dgl.add_self_loop(graph)
 
         qkv = self.attn_qkv_linear(x)
         qkv = qkv.reshape(-1, self.n_heads, self.d_head * 3)
@@ -214,10 +218,11 @@ class GTConv(nn.Module):
         return x
 
 
+# TODO: better name
+# TODO: do not store graph in self
 class SemiGraphConv(nn.Module):
     def __init__(
         self,
-        graph: dgl.DGLGraph,
         d_input: int,
         d_output: int,
         conv_type: Literal[
@@ -230,8 +235,8 @@ class SemiGraphConv(nn.Module):
         graph_conv_ratio: float,
     ):
         super().__init__()
+        self.graph: dgl.DGLGraph | None = None  # placeholder
         self.linear = nn.Linear(d_input, d_output)
-        self.graph = graph
         self.conv = {
             "gcn": GCNConv,
             "sage-mean": partial(SAGEConv, "mean"),
@@ -244,6 +249,9 @@ class SemiGraphConv(nn.Module):
         ).bool()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        assert self.graph is not None
         x = self.linear(x)
+        assert self.graph.device == x.device
         message = self.conv(self.graph, x)
-        return torch.where(self.mask.to(x.device), message, x)
+        y = torch.where(self.mask.to(x.device), message, x)
+        return y

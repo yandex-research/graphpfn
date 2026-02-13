@@ -1,0 +1,171 @@
+function = "bin.graphpfn.pretrain.main"
+
+[base_config]
+seed = 0
+amp = true
+n_steps = 4000
+n_gradient_accumulation_steps = 20
+epoch_size = 20
+gradient_clipping_norm = 1.0
+batch_size = 1
+base_checkpoint = "checkpoints/pretrain/checkpoint.ckpt"
+
+[base_config.model]
+edge_head = {}
+
+[base_config.optimizer]
+type = "AdamW"
+lr = 0.0003
+weight_decay = 0.1
+
+[[base_config.evaluation_data]]
+cache = false
+path = "data/tolokers-2"
+setting = "transductive"
+num_policy = "noisy-quantile-normal"
+ratio_policy = "noisy-quantile-uniform"
+cat_policy = "ordinal"
+internal_split_name = "RL"
+
+[[base_config.evaluation_data]]
+cache = false
+path = "data/city-reviews"
+setting = "transductive"
+num_policy = "noisy-quantile-normal"
+ratio_policy = "noisy-quantile-uniform"
+cat_policy = "ordinal"
+internal_split_name = "RL"
+
+[base_config.evaluation_data.pca.params]
+dim = 64
+
+[[base_config.evaluation_data]]
+cache = false
+path = "data/artnet-exp"
+setting = "transductive"
+num_policy = "noisy-quantile-normal"
+ratio_policy = "noisy-quantile-uniform"
+cat_policy = "ordinal"
+internal_split_name = "RL"
+
+[[base_config.evaluation_data]]
+cache = false
+path = "data/hm-prices"
+setting = "transductive"
+num_policy = "noisy-quantile-normal"
+ratio_policy = "noisy-quantile-uniform"
+cat_policy = "ordinal"
+internal_split_name = "RL"
+
+[[base_config.evaluation_data]]
+cache = false
+path = "data/avazu-ctr"
+setting = "transductive"
+num_policy = "noisy-quantile-normal"
+ratio_policy = "noisy-quantile-uniform"
+cat_policy = "ordinal"
+internal_split_name = "RL"
+
+[base_config.evaluation_data.pca.params]
+dim = 64
+
+[[base_config.evaluation_data]]
+cache = false
+path = "data/city-roads-M"
+setting = "transductive"
+num_policy = "noisy-quantile-normal"
+ratio_policy = "noisy-quantile-uniform"
+cat_policy = "ordinal"
+internal_split_name = "RL"
+
+[[base_config.evaluation_data]]
+cache = false
+path = "data/twitch-views"
+setting = "transductive"
+num_policy = "noisy-quantile-normal"
+ratio_policy = "noisy-quantile-uniform"
+cat_policy = "ordinal"
+internal_split_name = "RL"
+
+[[base_config.evaluation_data]]
+cache = false
+path = "data/artnet-views"
+setting = "transductive"
+num_policy = "noisy-quantile-normal"
+ratio_policy = "noisy-quantile-uniform"
+cat_policy = "ordinal"
+internal_split_name = "RL"
+
+[base_config.prior.fixed_hp]
+graph_sampler_type_list = [
+    "multi-level-sbm-with-pa",
+]
+
+[base_config.prior.sampled_hp.conv_type]
+distribution = "choice"
+choice_values = [
+    "gcn",
+    "sage-mean",
+    "sage-min",
+    "sage-max",
+    "gt",
+]
+
+[base_config.prior.sampled_hp.graph_conv_ratio]
+distribution = "choice"
+choice_values = [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+]
+
+[base_config.prior.sampled_hp.avg_degree]
+distribution = "mixed_log_uniform"
+min_first = 1.5
+max_first = 100
+min_second = 100
+max_second = 500
+p_first = 0.5
+
+[base_config.prior.sampled_hp.n_lappe_features]
+distribution = "uniform_int_with_default"
+min = 1
+max = 32
+p_default = 0.5
+default = 0
+
+[base_config.prior.sampled_hp.degree_features]
+distribution = "meta_choice"
+choice_values = [
+    true,
+    false,
+]
+
+[base_config.prior.sampled_hp.pagerank_features]
+distribution = "meta_choice"
+choice_values = [
+    true,
+    false,
+]
+
+[base_config.prior.extra_kwargs]
+min_seq_len = 8000
+max_seq_len = 10000
+
+[base_config.ema]
+decay = 0.95
+
+[base_config.lr_scheduler]
+n_warmup_steps = 400
+scheduler = "cosine"
+
+[base_config.ssl.edge]
+coef = 0.1

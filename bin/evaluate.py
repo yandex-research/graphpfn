@@ -67,7 +67,7 @@ def main(
             tmp_output = Path(tmp) / "output"
             next_report = function(next_config, tmp_output)
             lib.remove_tracked_files(tmp_output)
-            tmp_output.rename(next_output)
+            shutil.move(tmp_output, next_output)
 
         report["reports"].append(next_report)
         lib.dump_report(output, report)

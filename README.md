@@ -1,10 +1,17 @@
 # GraphPFN
 
-This is the official repository of "GraphPFN: A Prior-Data Fitted Graph Foundation Model" paper ([arXiv](https://arxiv.org/abs/2509.21489v1)). In this repository, we provide code for reproducing our experiments with GraphPFN, both pretraining and evaluation.
+This is the official repository of "GraphPFN: A Prior-Data Fitted Graph Foundation Model" paper ([arXiv](https://arxiv.org/abs/2509.21489)). In this repository, we provide code for reproducing our experiments with GraphPFN, both pretraining and evaluation.
+
+## News
+
+> GraphPFN-1.2 is out! The next release with refactored code and extended evaluation is also on the way, so stay tuned!
+
+- 2026-02-13: GraphPFN-1.2 released, featuring improved ICL performance, end-to-end dataset generation and more!
+- 2025-09-25: GraphPFN-1.0 released!
 
 ## Licenses
 
-Please note that we use third-party components (specifically, [TabICL](https://github.com/soda-inria/tabicl) and [LimiX](https://github.com/limix-ldm/LimiX)) in our code with some modifications. Please see `NOTICE` file and `LICENSES/` directory for details. Also, LimiX serves as a backbone for GraphPFN, and LimiX weights have their own license, please check out [LimiX repository](https://github.com/limix-ldm/LimiX) for details.
+This project uses modified versions of third-party components ([TabICL](https://github.com/soda-inria/tabicl) and [LimiX](https://github.com/limix-ldm/LimiX)). See the `NOTICE` file and `LICENSES/` directory for details. LimiX serves as the backbone for GraphPFN, and its weights have a separate license - see the [LimiX repository](https://github.com/limix-ldm/LimiX).
 
 ## Reproducing Experiments
 
@@ -15,31 +22,29 @@ Please note that we use third-party components (specifically, [TabICL](https://g
 ```
 uv sync
 ```
-3. For experiments on [GraphLand](https://github.com/yandex-research/graphland), download datasets and place them in "data" directory
+3. For experiments on [GraphLand](https://github.com/yandex-research/graphland), download datasets and place them in the "data" directory
 
 **Running the evaluation**
 
-You can execute a minimal evaluation run with a following command:
+You can execute a minimal evaluation run (GraphPFN finetuning with a single ensemble member) with the following command:
 
 ```
-uv run bin/go.py exp/graphpfn-eval/finetune/raw/tolokers-2/tuning.toml --force
+uv run bin/go.py exp/graphpfn-eval/finetune/01/tolokers-2/tuning.toml --force
 ```
 
 **Running the pretraining**
 
-First, you will need to generate graphs and store them in `data/graphpfn-graphs`, check `bin/prior/README.md` for details.
-
-Then, to run GraphPFN pretraining you can use the following command:
+To run GraphPFN pretraining you can use the following command:
 
 ```
-DGLBACKEND=pytorch uv run -m torch.distributed.run --nproc-per-node 8 bin/graphpfn_pretrain.py exp/graphpfn-pretrain/pretrain.toml
+DGLBACKEND=pytorch uv run -m torch.distributed.run --nproc-per-node 8 bin/go.py exp/graphpfn-stage-1/pretrain.toml
 ```
 
 ## Project Structure
 
 - `bin/` - Training and evaluation scripts
 - `exp/` - Experiment configurations and results
-- `data/` - Dataset directory (created after download)
+- `data/` - Dataset directory
 - `lib/` - Common utilities and tools
 
 ## Configuration

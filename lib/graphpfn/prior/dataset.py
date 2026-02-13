@@ -15,32 +15,31 @@ an infinite stream of synthetic datasets with diverse characteristics.
 
 from __future__ import annotations
 
-import os
-import sys
 import math
-import yaml
-import warnings
+import os
 import random
-from typing import Dict, Tuple, Union, Optional, Any
-
-import numpy as np
-from scipy.stats import loguniform
-import joblib
+import sys
+import warnings
+from typing import Any, Dict, Optional, Tuple, Union
 
 import dgl
+import joblib
+import numpy as np
 import torch
 import torch.nn.functional as F
+import yaml
+from loguru import logger
+from scipy.stats import loguniform
 from torch import Tensor
 from torch.nested import nested_tensor
 from torch.utils.data import IterableDataset
 
 from .gnn_scm import GNNSCM
-from .tree_scm import TreeSCM
-
+from .graph import GraphSampler
 from .hp_sampling import HpSamplerList
-from .reg2cls import Reg2Cls
 from .prior_config import DEFAULT_FIXED_HP, DEFAULT_SAMPLED_HP
-
+from .reg2cls import Reg2Cls
+from .tree_scm import TreeSCM
 
 warnings.filterwarnings(
     "ignore",
@@ -101,8 +100,8 @@ class Prior:
         min_seq_len: Optional[int] = None,
         max_seq_len: int = 1024,
         log_seq_len: bool = False,
-        min_train_size: Union[int, float] = 0.1,
-        max_train_size: Union[int, float] = 0.9,
+        min_train_size: Union[int, float] = 0.05,
+        max_train_size: Union[int, float] = 0.5,
         replay_small: bool = False,
     ):
         self.batch_size = batch_size
@@ -358,7 +357,8 @@ class Prior:
         X: Tensor,
         y: Tensor,
         train_size: int,
-        n_attempts: int = 10,
+        is_regression: bool,
+        n_attempts: int = 0,
         min_classes: int = 2,
     ) -> bool:
         """
@@ -390,17 +390,32 @@ class Prior:
         bool
             True if all datasets have valid splits, False otherwise
         """
+        if np.isnan(X).any() or np.isnan(y).any():
+            return False
 
-        def is_valid_split(yi: Tensor) -> bool:
+        def is_valid_split(xi: Tensor, yi: Tensor) -> bool:
             """Check if a single dataset has a valid train/test split."""
             # Guard against invalid train_size
             if train_size <= 0 or train_size >= yi.shape[0]:
                 return False
 
-            # A valid split requires both train and test sets to have the same classes
-            # and at least min_classes different classes must be present
             unique_tr = torch.unique(yi[:train_size])
             unique_te = torch.unique(yi[train_size:])
+
+            # Additionaly check that there are enough features
+            # TODO: do not hardcode 4
+            n_unique_xi_tr = [
+                len(torch.unique(xi[:train_size, i])) for i in range(xi.shape[1])
+            ]
+            n_valid_features = sum([1 if x > 1 else 0 for x in n_unique_xi_tr])
+            if n_valid_features < 4:
+                return False
+
+            if is_regression:
+                return (len(unique_tr) > 10) and (len(unique_te) > 10)
+
+            # A valid split requires both train and test sets to have the same classes
+            # and at least min_classes different classes must be present
             return (
                 set(unique_tr.tolist()) == set(unique_te.tolist())
                 and len(unique_tr) >= min_classes
@@ -408,18 +423,20 @@ class Prior:
 
         # Check each dataset in the batch
         for i, (xi, yi) in enumerate(zip(X, y)):
-            if is_valid_split(yi):
+            if is_valid_split(xi, yi):
                 continue
 
             # If the dataset has an invalid split, try to fix it with random permutations
             succeeded = False
+            if n_attempts != 0:
+                raise NotImplementedError("TODO: shuffle graphs")
             for _ in range(n_attempts):
                 # Generate a random permutation of the samples
                 perm = torch.randperm(yi.shape[0])
                 yi_perm = yi[perm]
                 xi_perm = xi[perm]
                 # Check if the permutation results in a valid split
-                if is_valid_split(yi_perm):
+                if is_valid_split(xi_perm, yi_perm):
                     X[i], y[i] = xi_perm, yi_perm
                     succeeded = True
                     break
@@ -506,19 +523,18 @@ class SCMPrior(Prior):
     def __init__(
         self,
         *,
-        graphs_info_path: str = "data/graphpfn-graphs/info.yaml",
         batch_size: int = 1,
         batch_size_per_gp: int = 1,
         batch_size_per_subgp: Optional[int] = None,
         min_features: int = 4,
         max_features: int = 100,
         max_classes: int = 10,
-        min_seq_len: Optional[int] = None,  # TODO: remove
-        max_seq_len: int = 10_000,  # TODO: remove
+        min_seq_len: Optional[int] = 500,
+        max_seq_len: int = 10_000,
         log_seq_len: bool = False,
         seq_len_per_gp: bool = False,
         min_train_size: Union[int, float] = 0.05,
-        max_train_size: Union[int, float] = 0.2,
+        max_train_size: Union[int, float] = 0.5,
         replay_small: bool = False,
         prior_type: str = "gnn_scm",
         fixed_hp: Dict[str, Any] = DEFAULT_FIXED_HP,
@@ -550,19 +566,6 @@ class SCMPrior(Prior):
         self.num_threads_per_generate = num_threads_per_generate
         self.device = device
 
-        self.graphs_info = self.load_graphs_info(graphs_info_path)
-        self.current_graph_idx: int = 0
-
-    def load_graphs_info(self, graphs_info_path: str) -> list[dict[str, Any]]:
-        with open(graphs_info_path) as file:
-            graphs_info = yaml.safe_load(file)
-        # We want shuffling, so consecutive indices have diverse graphs.
-        # But at the same time, we want shuffle to be consistent across devices.
-        # TODO: maybe fix to base_seed independent of rank?
-        rng = random.Random(42)
-        rng.shuffle(graphs_info)
-        return graphs_info
-
     def hp_sampling(self) -> Dict[str, Any]:
         """
         Sample hyperparameters for dataset generation.
@@ -576,9 +579,7 @@ class SCMPrior(Prior):
         return hp_sampler.sample()
 
     @torch.no_grad()
-    def generate_dataset(
-        self, params: Dict[str, Any]
-    ) -> Tuple[dgl.DGLGraph, Tensor, Tensor, Tensor]:
+    def generate_dataset(self, params: Dict[str, Any]) -> Tuple[Tensor, Tensor, Tensor]:
         """
         Generates a single valid dataset based on the provided parameters.
 
@@ -605,7 +606,10 @@ class SCMPrior(Prior):
             raise ValueError(f"Unknown prior type {params['prior_type']}")
 
         while True:
-            graph, X, y = prior_cls(**params)()
+            X, y = prior_cls(**params)()
+            params["train_size"] = self.sample_train_size(
+                self.min_train_size, self.max_train_size, X.shape[0]
+            )
             X, y = Reg2Cls(params)(X, y)
 
             # Add batch dim for single dataset to be compatible with delete_unique_features and sanity_check
@@ -616,13 +620,18 @@ class SCMPrior(Prior):
 
             # Only keep valid datasets with sufficient features and balanced classes
             X, d = self.delete_unique_features(X, d)
-            if (d > 0).all() and self.sanity_check(X, y, params["train_size"]):
-                return graph, X.squeeze(0), y.squeeze(0), d.squeeze(0)
+            if (d >= 4).all().item() and self.sanity_check(
+                X,
+                y,
+                params["train_size"],
+                is_regression=(params["num_classes"] == 0),
+            ):
+                return X.squeeze(0), y.squeeze(0), d.squeeze(0)
 
     @torch.no_grad()
     def get_batch(
         self, batch_size: Optional[int] = None
-    ) -> Tuple[list[dgl.DGLGraph], Tensor, Tensor, Tensor, Tensor, Tensor]:
+    ) -> Tuple[dgl.DGLGraph, Tensor, Tensor, Tensor, Tensor, Tensor]:
         """
         Generates a batch of datasets by first creating a parameter list and then processing it.
 
@@ -650,6 +659,7 @@ class SCMPrior(Prior):
         train_sizes : Tensor
             Position for train/test split for each dataset, shape (batch_size,)
         """
+
         batch_size = batch_size or self.batch_size
 
         # Calculate number of groups and subgroups
@@ -664,14 +674,28 @@ class SCMPrior(Prior):
         global_train_size = None
 
         # Determine global seq_len/train_size if not per-group
-        if not self.seq_len_per_gp:
-            graph_idx = self.current_graph_idx % len(self.graphs_info)
-            global_graph_info = self.graphs_info[graph_idx]
-            global_seq_len = global_graph_info["num_nodes"]
+        global_seq_len = self.sample_seq_len(
+            self.min_seq_len,
+            self.max_seq_len,
+            log=self.log_seq_len,
+            replay_small=self.replay_small,
+        )
 
-            global_train_size = self.sample_train_size(
-                self.min_train_size, self.max_train_size, global_seq_len
-            )
+        global_train_size = self.sample_train_size(
+            self.min_train_size, self.max_train_size, global_seq_len
+        )
+
+        # Generate graph (same for the all datasets in batch)
+        graph_hp = (
+            self.hp_sampling() | self.fixed_hp
+        )  # TODO: find more elegant solution
+        gsampler = GraphSampler(
+            n_nodes=global_seq_len,
+            avg_degree=graph_hp["avg_degree"],
+            sampler_type_list=graph_hp["graph_sampler_type_list"],
+            device=self.device,
+        )
+        graph = gsampler.sample()
 
         # Generate parameters for each group
         for gp_idx in range(num_gps):
@@ -681,14 +705,9 @@ class SCMPrior(Prior):
                 break
 
             group_sampled_hp = self.hp_sampling()
-            # If per-group, sample seq_len and train_size for this group. Otherwise, use global ones
-            if self.seq_len_per_gp:
-                raise NotImplementedError("TODO: currently not supported")
-            else:
-                gp_graph_info = global_graph_info
-                gp_seq_len = global_seq_len
-                gp_train_size = global_train_size
-                gp_max_features = self.max_features
+            gp_seq_len = global_seq_len
+            gp_train_size = global_train_size
+            gp_max_features = self.max_features
 
             # Calculate number of subgroups for this group
             num_subgps_in_gp = math.ceil(actual_gp_size / size_per_subgp)
@@ -714,15 +733,17 @@ class SCMPrior(Prior):
                 # Generate parameters for each dataset in this subgroup
                 for ds_idx in range(actual_subgp_size):
                     # Each dataset has its own number of classes
-                    if np.random.random() > 0.5:
+                    if np.random.random() < 0.33:
+                        ds_num_classes = 0  # regression
+                    elif np.random.random() < 0.5:
                         ds_num_classes = np.random.randint(2, self.max_classes + 1)
                     else:
                         ds_num_classes = 2
 
                     # Create parameters dictionary for this dataset
                     params = {
+                        "graph": graph,  # TODO: find more elegant solution
                         **self.fixed_hp,  # Fixed HPs
-                        "graph_info": gp_graph_info,
                         "seq_len": gp_seq_len,
                         "train_size": gp_train_size,
                         # If per-gp setting, use adjusted max features for this group because we use nested tensors
@@ -757,7 +778,7 @@ class SCMPrior(Prior):
         else:
             results = [self.generate_dataset(params) for params in param_list]
 
-        graph_list, X_list, y_list, d_list = zip(*results)
+        X_list, y_list, d_list = zip(*results)
 
         # Combine Results
         if self.seq_len_per_gp:
@@ -784,7 +805,7 @@ class SCMPrior(Prior):
             dtype=torch.long,
         )
 
-        return graph_list, X, y, d, seq_lens, train_sizes
+        return graph, X, y, d, seq_lens, train_sizes
 
     def get_prior(self) -> str:
         """
@@ -854,8 +875,8 @@ class DummyPrior(Prior):
         min_seq_len: Optional[int] = None,
         max_seq_len: int = 1024,
         log_seq_len: bool = False,
-        min_train_size: Union[int, float] = 0.1,
-        max_train_size: Union[int, float] = 0.9,
+        min_train_size: Union[int, float] = 0.05,
+        max_train_size: Union[int, float] = 0.5,
         device: str = "cpu",
     ):
         super().__init__(
@@ -1009,19 +1030,19 @@ class PriorDataset(IterableDataset):
         min_features: int = 4,
         max_features: int = 100,
         max_classes: int = 10,
-        min_seq_len: Optional[int] = None,  # TODO: maybe remove this
-        max_seq_len: int = 1024,
-        log_seq_len: bool = False,
+        min_seq_len: Optional[int] = 500,
+        max_seq_len: int = 10_000,
+        log_seq_len: bool = True,
         seq_len_per_gp: bool = False,
         min_train_size: Union[int, float] = 0.05,
-        max_train_size: Union[int, float] = 0.2,
+        max_train_size: Union[int, float] = 0.5,
         replay_small: bool = False,
         prior_type: str = "gnn_scm",
         scm_fixed_hp: Dict[str, Any] = DEFAULT_FIXED_HP,
         scm_sampled_hp: Dict[str, Any] = DEFAULT_SAMPLED_HP,
         n_jobs: int = 0,
         num_threads_per_generate: int = 1,
-        device: str = "cpu",
+        device: torch.device = torch.device("cpu"),
     ):
         super().__init__()
         if prior_type == "dummy":
@@ -1128,14 +1149,16 @@ class PriorDataset(IterableDataset):
         """
         return self
 
-    def __next__(self) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    def __next__(
+        self,
+    ) -> Tuple[dgl.DGLGraph, Tensor, Tensor, Tensor, Tensor, Tensor]:
         """
         Returns the next batch from the iterator. Since this is an infinite
         iterator, it never raises StopIteration and instead continuously generates
         new synthetic data batches.
         """
         with DisablePrinting():
-            return self.get_batch()
+            return self.get_batch()  # type: ignore
 
     def __repr__(self) -> str:
         """
