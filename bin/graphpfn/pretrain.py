@@ -1,9 +1,10 @@
 import math
 import warnings
+from collections.abc import Callable
 from contextlib import nullcontext
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, NotRequired
 
 import delu
 import dgl
@@ -14,26 +15,32 @@ import torch.distributed
 import torch.nn as nn
 import torch.nn.functional as F
 from loguru import logger
-from sklearn.preprocessing import FunctionTransformer, QuantileTransformer
 from torch.nn.parallel import DistributedDataParallel
 from tqdm import tqdm
-from typing_extensions import NotRequired, Sequence, TypedDict  # noqa: UP035
+from typing_extensions import TypedDict
 
 import lib
 from lib import KWArgs, PartKey
-from lib.graph.data import GraphDataset
+from lib.graph.data import GraphDataset, TaskType
 from lib.graphpfn.model import GraphPFN
-from lib.graphpfn.prior.wrapper import GraphPrior
+from lib.graphpfn.prior import GraphPriorSampler, GraphPriorSamplerDDP
+from lib.graphpfn.prior.prior_typings import DistributionConfig
 from lib.graphpfn.util import SimpleEdgeSampler
-from lib.util import Checkpoint, random_float
+from lib.util import backup, make_seed, random_float, tracker
 
 EvalOut = dict[str, Any]
+
+
+class EvaluationDataConfig(TypedDict):
+    real: list[KWArgs]
+    n_synthetic_per_gpu: int
 
 
 class Config(TypedDict):
     # Misc
     seed: int
     amp: NotRequired[bool]  # Automatic mixed precision in bfloat16.
+    tracker: NotRequired[KWArgs]
 
     # Learning
     base_checkpoint: NotRequired[str | Path]
@@ -46,179 +53,184 @@ class Config(TypedDict):
     epoch_size: int
     batch_size: int
     prior: KWArgs
+    sampler: NotRequired[KWArgs]
     model: NotRequired[KWArgs]
     ssl: NotRequired[KWArgs]
 
     # Evaluation
-    evaluation_data: list[KWArgs]
+    evaluation_data: EvaluationDataConfig
 
 
-def preprocess_targets(
+def evaluate_dataset(
+    graphpfn: nn.Module,
     dataset: GraphDataset,
-    quantile_transform: bool = False,
-) -> dict:
-    if dataset.task.is_regression:
-        dataset.data["labels"], regression_label_stats = lib.data.standardize_labels(
-            dataset.data["labels"], dataset.data["masks"]
+    device: torch.device,
+    amp_enabled: bool,
+    parts: list[str] = ["val", "test"],
+) -> dict[str, Any]:
+    assert dataset.task.is_transductive
+    prediction_type = "labels" if dataset.task.is_regression else "probs"
+
+    regression_label_stats = lib.graph.data.prepare_labels(dataset, True)
+
+    dataset = dataset.to_torch(device)
+    features = lib.graph.data.flatten_features(dataset.features)
+    assert features is not None
+    features = lib.graph.data.drop_constant_features(
+        features,
+        dataset.data["masks"]["train"],  # type: ignore
+    )
+    y_train = dataset.data["labels"][dataset.data["masks"]["train"]].to(  # type: ignore
+        dtype=torch.float32, device=device
+    )
+
+    with torch.autocast(
+        device.type,
+        enabled=amp_enabled,
+        dtype=torch.bfloat16 if amp_enabled else None,
+    ):
+        out = graphpfn(
+            graph=dataset.data["graph"],
+            features=features,
+            y_train=y_train,
+            train_mask=dataset.data["masks"]["train"],
+            task_type=dataset.task.type_,
+            n_random_features=8,  # TODO: do not hardcode
         )
-        if quantile_transform:
-            target_transform = QuantileTransformer(
-                output_distribution="normal",
-                subsample=None,  # type: ignore
-            ).fit(dataset.data["labels"][dataset.data["masks"]["train"]].reshape(-1, 1))
-        else:
-            target_transform = FunctionTransformer(func=None)
-        dataset.data["labels"] = (  # type: ignore
-            target_transform.transform(dataset.data["labels"].reshape(-1, 1))
-            .astype(np.float32)  # type: ignore
-            .squeeze()
+
+    predictions: dict[PartKey, np.ndarray] = {}
+
+    for part in parts:
+        predictions[part] = (
+            out["predictions"][dataset.data["masks"][part], ...].cpu().numpy()
         )
+
+    if regression_label_stats is not None:
+        pred_transform = (  # noqa: E731
+            lambda tensor: tensor * regression_label_stats.std
+            + regression_label_stats.mean
+        )
+        predictions = {
+            k: pred_transform(torch.from_numpy(v).to(device)).cpu().numpy()  # pyright: ignore
+            for k, v in predictions.items()
+        }
     else:
-        regression_label_stats = None
-        target_transform = None
-
-    return {
-        "target_transform": target_transform,
-        "regression_label_stats": regression_label_stats,
-    }
-
-
-def preprocess_tfm_features(
-    dataset: GraphDataset, add_ratio_features_to="num_features"
-) -> np.ndarray:
-    data = {
-        "num_features": dataset.data.get("num_features", None),
-        "ratio_features": dataset.data.get("ratio_features", None),
-        "cat_features": dataset.data.get("cat_features", None),
-    }
-
-    # Convert ratio features
-    if data["ratio_features"] is not None:
-        x_ratio: np.ndarray = data["ratio_features"]
-        if data[add_ratio_features_to] is None:
-            x_add_ratio_features_to: np.ndarray = np.zeros(
-                (x_ratio.shape[0], 0), dtype=np.float32
+        predictions = {
+            k: scipy.special.softmax(
+                v[..., : dataset.task.compute_n_classes()], axis=-1
             )
-        else:
-            x_add_ratio_features_to = data[add_ratio_features_to]  # type: ignore
-        data[add_ratio_features_to] = np.column_stack(
-            [
-                x_add_ratio_features_to,
-                x_ratio.astype(np.float32),
-            ]
-        )
-        del x_ratio
+            for k, v in predictions.items()
+        }
+        if dataset.task.is_binclass:
+            predictions = {k: v[..., 1] for k, v in predictions.items()}
 
-    # Remove features with just one unique value in the training set.
-    for features_type in ["num_features", "cat_features"]:
-        features = data.pop(features_type, None)
-        if features is None:
-            continue
-        n_features = features.shape[1]
-        good_features_idx = [
-            i
-            for i in range(n_features)
-            if len(np.unique(features[dataset.data["masks"]["train"], i])) > 1
-        ]
-        if len(good_features_idx) < n_features:
-            features = features[:, good_features_idx]
-        data[features_type] = features
+    for part in list(predictions.keys()):
+        if predictions[part].shape[0] == 0:
+            predictions.pop(part)
 
-    # concat all features
-    tfm_features_list = []
-    for features_type in ["num_features", "cat_features"]:
-        features = data.get(features_type, None)
-        if features is not None:
-            tfm_features_list.append(features)
-    tfm_features = np.concatenate(tfm_features_list, axis=1)
+    return (
+        dataset.task.calculate_metrics(predictions, prediction_type)
+        if lib.are_valid_predictions(predictions)
+        else {x: {"score": -999999.0} for x in predictions}
+    )
 
-    return tfm_features
+
+def get_real_eval_dataset(config: KWArgs) -> GraphDataset:
+    dataset = lib.graph.data.GraphDataset.from_dir(**config["data"])
+    features = lib.graph.data.transform_features(
+        dataset.features, dataset.task, **config["transform"]["features"]
+    )
+    features = lib.graph.data.apply_d_reduction(
+        features,
+        dataset.task,
+        **config.get("d_reduction", {}),
+    )
+    dataset.data.update(features)  # type: ignore
+    return dataset
+
+
+@delu.random.preserve_state()
+def get_synthetic_eval_dataset(
+    idx: int,
+    config: DistributionConfig,
+    base_seed: int,
+) -> GraphDataset:
+    delu.random.seed(make_seed(base_seed, "eval", lib.get_rank(), idx))
+    batch = lib.graphpfn.prior.sample_batch(config, 1, torch.device("cpu"))
+    datasets = lib.graphpfn.prior.unbatch_prior_dataset(batch)
+    assert len(datasets) == 1
+    name = f"synthetic-{idx:03d}"
+    return lib.graphpfn.prior.convert_to_graph_dataset(datasets[0], name)
+
+
+def test_synthetic_eval_dataset_determinism(
+    n_datasets: int,
+    config: DistributionConfig,
+    base_seed: int,
+) -> None:
+    """Checks that synthetic dataset generation for evaluation is deterministic"""
+    for idx in range(n_datasets):
+        first = get_synthetic_eval_dataset(idx, config, base_seed).data
+        second = get_synthetic_eval_dataset(idx, config, base_seed).data
+
+        assert first["name"] == second["name"]
+        np.testing.assert_array_equal(first["labels"], second["labels"])
+        for key in first["masks"]:
+            np.testing.assert_array_equal(first["masks"][key], second["masks"][key])
+        for key in lib.graph.data.GRAPH_FEATURE_KEYS:
+            if first[key] is None:
+                assert second[key] is None
+            else:
+                np.testing.assert_array_equal(first[key], second[key])
+
+        g1, g2 = first["graph"], second["graph"]
+        assert g1.num_nodes() == g2.num_nodes()
+        assert g1.num_edges() == g2.num_edges()
+        np.testing.assert_array_equal(g1.edges()[0].numpy(), g2.edges()[0].numpy())
+        np.testing.assert_array_equal(g1.edges()[1].numpy(), g2.edges()[1].numpy())
 
 
 @torch.inference_mode()
 def evaluate(
     graphpfn: nn.Module,
-    evaluation_data: list[KWArgs],
+    evaluation_data_config: EvaluationDataConfig,
     device: torch.device,
     amp_enabled: bool,
+    get_synthetic_eval_dataset_fn: Callable[[int], GraphDataset],
     parts: list[str] = ["val", "test"],
 ) -> EvalOut:
     graphpfn.eval()
 
     metrics: EvalOut = dict()
 
-    for dataset in evaluation_data:
-        if not isinstance(dataset, GraphDataset):
-            dataset = lib.graph.data.build_dataset(**dataset)
+    for config in evaluation_data_config["real"]:
+        dataset = get_real_eval_dataset(config)
+        dataset_metrics = evaluate_dataset(
+            graphpfn,
+            dataset,
+            device=device,
+            amp_enabled=amp_enabled,
+            parts=parts,
+        )
         name = dataset.data["name"]
-        prediction_type = "labels" if dataset.task.is_regression else "probs"
-
-        preprocess_targets_results = preprocess_targets(dataset)
-        regression_label_stats = preprocess_targets_results["regression_label_stats"]
-
-        assert dataset.task.is_transductive
-        features = preprocess_tfm_features(dataset)
-
-        dataset = dataset.to_torch(device)
-        features = torch.tensor(features, device=device)
-        y_train = dataset.data["labels"][dataset.data["masks"]["train"]].to(  # type: ignore
-            dtype=torch.float32, device=device
-        )
-
-        with torch.autocast(
-            device.type,
-            enabled=amp_enabled,
-            dtype=torch.bfloat16 if amp_enabled else None,
-        ):
-            out = graphpfn(
-                graph=dataset.data["graph"],
-                features=features,
-                y_train=y_train,
-                train_mask=dataset.data["masks"]["train"],
-                task_type=dataset.task.type_,
-                checkpointing=False,
-                batched_attn=(dataset.size() >= 2**16 - 1),
-            )
-
-        predictions: dict[PartKey, np.ndarray] = {}
-
-        for part in parts:
-            predictions[part] = (
-                out["predictions"][dataset.data["masks"][part], ...].cpu().numpy()
-            )
-
-        if regression_label_stats is not None:
-            pred_transform = (  # noqa: E731
-                lambda tensor: (
-                    tensor * regression_label_stats.std + regression_label_stats.mean
-                )
-            )
-            predictions = {
-                k: pred_transform(torch.from_numpy(v).to(device)).cpu().numpy()  # pyright: ignore
-                for k, v in predictions.items()
-            }
-        else:
-            predictions = {
-                k: scipy.special.softmax(
-                    v[..., : dataset.task.compute_n_classes()], axis=-1
-                )
-                for k, v in predictions.items()
-            }
-            if dataset.task.is_binclass:
-                predictions = {k: v[..., 1] for k, v in predictions.items()}
-
-        for part in list(predictions.keys()):
-            if predictions[part].shape[0] == 0:
-                predictions.pop(part)
-
-        dataset_metrics = (
-            dataset.task.calculate_metrics(predictions, prediction_type)
-            if lib.are_valid_predictions(predictions)
-            else {x: {"score": -999999.0} for x in predictions}
-        )
-
         for k, v in dataset_metrics.items():
             metrics[f"{name} ({k})"] = v
+
+    synthetic_scores = []
+    for idx in range(evaluation_data_config["n_synthetic_per_gpu"]):
+        dataset = get_synthetic_eval_dataset_fn(idx)
+        dataset_metrics = evaluate_dataset(
+            graphpfn,
+            dataset,
+            device=device,
+            amp_enabled=amp_enabled,
+            parts=["test"],
+        )
+        synthetic_scores.append(dataset_metrics["test"]["score"])
+
+    metrics["synthetic"] = {
+        "score": lib.allreduce_float(np.mean(synthetic_scores).item())
+    }
 
     return metrics
 
@@ -229,14 +241,9 @@ def main(
     *,
     force: bool = False,
     continue_: bool = False,
+    profiler: torch.profiler.profile | None = None,
+    tiny: bool = False,
 ) -> None | lib.JSONDict:
-    # >>> start
-    exp = lib.Experiment()
-    config, output = exp.check(config, output, config_type=Config)
-    if not exp.start(main, force=force, continue_=continue_):
-        return None
-
-    # TODO: clean up this?
     warnings.filterwarnings(
         "ignore", message=".*pkg_resources is deprecated as an AP.*"
     )
@@ -246,11 +253,64 @@ def main(
     )
     warnings.filterwarnings("ignore", category=FutureWarning)
 
-    step = 0
+    # >>> start
+    if lib.is_ddp():
+        lib.configure_ddp(timeout_minutes=30)
+    lib.configure_logging(enqueue=True)
+
+    logger.info(f"Launching on {torch.cuda.device_count()} devices")
+
+    config, output = lib.check(config, output, config_type=Config)
+
+    if lib.is_master_process():
+        start = lib.start(main, output, force=force, continue_=continue_)
+        lib.broadcast_bool(start)
+    else:
+        start = lib.broadcast_bool()
+
+    if not start:
+        return None
+
     output = Path(output)
-    device = lib.get_device(exp.device_id)  # TODO: refactor to exp.device
-    report = lib.create_report(main, config)  # type: ignore
+    rank = lib.get_rank()
+    world_size = lib.get_world_size()
+
+    if tiny:
+        config["n_steps"] = 9
+        config["n_gradient_accumulation_steps"] = 4
+        config["epoch_size"] = 3
+        config["evaluation_data"]["real"] = config["evaluation_data"]["real"][:2]
+        config["evaluation_data"]["n_synthetic_per_gpu"] = 2
+
     timer = delu.tools.Timer()
+    timer.run()
+
+    # >>> seeding & tracker
+    loaded_checkpoint = (
+        lib.load_checkpoint(output)
+        if continue_ and lib.get_checkpoint_path(output).exists()
+        else None
+    )
+
+    if lib.is_master_process():
+        name = str(output.parent.relative_to(lib.env.get_exp_dir()))
+        tracker.init(
+            config,  # type: ignore
+            name,
+            run_uid=loaded_checkpoint["run_uid"] if loaded_checkpoint else None,
+            step=loaded_checkpoint["step"] + 1 if loaded_checkpoint else 0,
+            **config.get("tracker", {}),
+        )
+        lib.print_config(config)  # type: ignore
+        print()
+
+    resume_step = loaded_checkpoint["step"] if loaded_checkpoint is not None else 0
+    delu.random.seed(make_seed(config["seed"], "main", rank, resume_step))
+    del loaded_checkpoint
+
+    step = 0
+    device = lib.get_device()
+    report = lib.create_report(main, config)  # type: ignore
 
     # >>> model
     logger.info(
@@ -265,21 +325,21 @@ def main(
             for k, v in checkpoint["model_ema"].items()
             if k.startswith("module.")
         }
-        graphpfn.load_state_dict(state_dict)
+        assert all([k in graphpfn.state_dict() for k in state_dict.keys()])
+        graphpfn.load_state_dict(state_dict, strict=False)
 
     report["n_parameters"] = lib.deep.get_n_parameters(graphpfn)
 
     logger.info(f"n_parameters = {report['n_parameters']}")
 
     graphpfn_without_ddp = graphpfn
-    if exp.ddp:
+    if lib.is_ddp():
         graphpfn = DistributedDataParallel(
             graphpfn,
-            device_ids=[exp.rank],
-            output_device=exp.rank,
-            find_unused_parameters=True,  # TODO: fix this
+            device_ids=[rank],
+            output_device=rank,
+            find_unused_parameters=True,
         )
-        graphpfn_without_ddp = graphpfn.module
 
     if "ema" in config:
         multi_avg_fn = torch.optim.swa_utils.get_ema_multi_avg_fn(
@@ -294,8 +354,17 @@ def main(
         graphpfn_ema = graphpfn_without_ddp
 
     # >>> datasets
-    graph_prior = GraphPrior(device=torch.device("cpu"), **config["prior"])
-    evaluation_data: Sequence[KWArgs | GraphDataset] = config["evaluation_data"]
+    sampler_cls = GraphPriorSamplerDDP if lib.is_ddp() else GraphPriorSampler
+    graph_prior = sampler_cls(
+        config=config["prior"],
+        seed=make_seed(config["seed"], "sampler", resume_step),
+        **config.get("sampler", {}),
+    )
+    test_synthetic_eval_dataset_determinism(
+        config["evaluation_data"]["n_synthetic_per_gpu"],
+        config["prior"],
+        config["seed"],
+    )
 
     # >>> prepare training
 
@@ -325,9 +394,9 @@ def main(
     )
     logger.info(f"AMP enabled: {amp_enabled}")
 
-    def prepare_checkpoint(step: int) -> Checkpoint:
+    def prepare_checkpoint(step: int) -> dict:
         return {
-            "run_uid": exp.run_uid if exp.master_process else None,
+            "run_uid": tracker.get_uid(),
             "step": step,
             "report": report,
             "timer": timer,
@@ -341,8 +410,31 @@ def main(
             "extra": {},
         }
 
+    def save_checkpoint(checkpoint: dict) -> None:
+        lib.barrier()
+        if lib.is_master_process():
+            info = {
+                k: v["score"] for k, v in checkpoint["report"]["metrics"].items()
+            } | {
+                "lr": (
+                    checkpoint["report"]["lr"][0]
+                    if "lr" in checkpoint["report"]
+                    else None
+                ),
+                "loss": (
+                    checkpoint["report"]["loss"]
+                    if "loss" in checkpoint["report"]
+                    else None
+                ),
+            }
+            logger.info(f"{info=}")
+            tracker.log(info, step=checkpoint["step"])
+            lib.dump_checkpoint(output, checkpoint)
+            backup(output)
+        lib.barrier()
+
     def load_from_checkpoint(
-        checkpoint: Checkpoint,
+        checkpoint: dict,
     ) -> tuple[int, dict, delu.tools.Timer]:
         graphpfn_without_ddp.load_state_dict(checkpoint["model"])
         graphpfn_ema.load_state_dict(checkpoint["model_ema"])
@@ -365,28 +457,41 @@ def main(
 
     eval_fn = partial(
         evaluate,
-        evaluation_data=evaluation_data,
+        evaluation_data_config=config["evaluation_data"],
         device=device,
         amp_enabled=amp_enabled,
+        get_synthetic_eval_dataset_fn=partial(
+            get_synthetic_eval_dataset,
+            config=config["prior"],
+            base_seed=config["seed"],
+        ),
         parts=["val", "test"],
     )
 
     # TODO: move this outside of main?
     def step_fn():
-        dataset = next(graph_prior)
+        batch = next(graph_prior)
         ssl_feat_config = config.get("ssl", dict()).get("feat", None)
         ssl_edge_config = config.get("ssl", dict()).get("edge", None)
 
-        assert dataset.task.is_transductive
-        features = preprocess_tfm_features(dataset)
+        n_nodes = int(batch["n_nodes"][0].item())
+        n_features = int(batch["n_features"][0].item())
+        n_edges = int(batch["n_edges"][0].item())
+        n_train_nodes = batch["n_train_nodes"]
+        task_type = batch["task_type"]
 
-        dataset = dataset.to_torch(device)
-        graph = dataset.data["graph"]
-        train_mask = dataset.data["masks"]["train"]
-        features = torch.tensor(features, device=device)
-        y_train = dataset.data["labels"][dataset.data["masks"]["train"]].to(  # type: ignore
-            dtype=torch.float32, device=device
+        edges = batch["edges"]
+        graph = dgl.graph(
+            (edges[0, 0, :n_edges], edges[0, 1, :n_edges]),
+            num_nodes=n_nodes,
+            device=device,
         )
+        features = batch["features"][0, :n_nodes, :n_features].to(device)
+        labels = batch["labels"][0, :n_nodes].to(device)
+
+        train_mask = torch.zeros(n_nodes, dtype=torch.bool, device=device)
+        train_mask[:n_train_nodes] = True
+        y_train = labels[train_mask].to(dtype=torch.float32)
 
         features_mean = features[train_mask].mean(-2)
         features_std = features[train_mask].std(-2)
@@ -406,7 +511,7 @@ def main(
                 assert features.ndim == 2
                 permutation = torch.randint(
                     low=0,
-                    high=dataset.size(),
+                    high=n_nodes,
                     size=features.shape,
                     device=features.device,
                 )
@@ -461,26 +566,25 @@ def main(
                 features=features,
                 y_train=y_train,
                 train_mask=train_mask,
-                task_type=dataset.task.type_,
-                checkpointing=True,
+                task_type=task_type,
                 edges=edges,
+                n_random_features=0,
             )
 
         pred = out["predictions"]
-        pred = pred[~dataset.data["masks"]["train"]].unsqueeze(0)
+        pred = pred[~train_mask].unsqueeze(0)
 
-        # NOTE: IMPORTANT. Not use this for finetune on real-world datasets.
-        labels = dataset.data["labels"]
-        if dataset.task.is_classification:
+        is_classification = task_type in [TaskType.BINCLASS, TaskType.MULTICLASS]
+        if is_classification:
             sup_loss = F.cross_entropy(
                 pred.permute(0, 2, 1),
-                labels[~dataset.data["masks"]["train"]].unsqueeze(0).long(),  # type: ignore
+                labels[~train_mask].unsqueeze(0).long(),
             )
         else:
             loss_fn = F.mse_loss
             sup_loss = loss_fn(
                 pred,
-                labels[~dataset.data["masks"]["train"]].unsqueeze(0),  # type: ignore
+                labels[~train_mask].unsqueeze(0),
             ).mean()
 
         loss = sup_loss
@@ -494,6 +598,7 @@ def main(
                 input=torch.zeros_like(out["features_pred"][feat_mask]),  # type: ignore
                 target=original_features[feat_mask],  # type: ignore
             )
+            logger.info(f"{feat_loss.item()=} {baseline_loss.item()=}")
             loss = loss + ssl_feat_config["coef"] * feat_loss
 
         if ssl_edge_config is not None:
@@ -510,11 +615,33 @@ def main(
     report["train"] = {"metrics": {"val": {"score": -math.inf}}}
     n_steps = config["n_steps"]
 
-    checkpoint = exp.load_checkpoint() if continue_ else None
+    lib.barrier()
+    checkpoint = (
+        lib.load_checkpoint(output)
+        if continue_ and lib.get_checkpoint_path(output).exists()
+        else None
+    )
+    is_resuming = checkpoint is not None
+    lib.barrier()
     if checkpoint is not None:
         step, report, timer = load_from_checkpoint(checkpoint)
+        del checkpoint
 
     timer.run()
+
+    if not is_resuming:
+        delu.cuda.free_memory()
+        metrics = eval_fn(graphpfn_ema)
+        report["train"]["best_step"] = step  # type: ignore
+        report["train"]["metrics"] = metrics
+        report["metrics"] = metrics
+        report["lr"] = (
+            lr_scheduler.get_last_lr()
+            if lr_scheduler is not None
+            else config["optimizer"]["lr"]
+        )
+        report["loss"] = float("nan")
+        save_checkpoint(prepare_checkpoint(step))
 
     while n_steps == -1 or step < n_steps:
         logger.info(f"[...] {output} | {timer}")
@@ -525,7 +652,7 @@ def main(
         delu.cuda.free_memory()
 
         iterator = range(epoch_size)
-        if exp.master_process:
+        if lib.is_master_process():
             iterator = tqdm(iterator, desc=f"Epoch {step // epoch_size} Step {step}")
 
         for _ in iterator:
@@ -535,15 +662,17 @@ def main(
                     "n_gradient_accumulation_steps"
                 ]
 
-                if lib.is_ddp() and not is_gradient_step:
-                    context = graphpfn.no_sync()
-                else:
-                    context = nullcontext()
-
-                with context:
+                with (
+                    graphpfn.no_sync()
+                    if lib.is_ddp() and not is_gradient_step
+                    else nullcontext()
+                ):
                     loss = step_fn()
                     (loss / config["n_gradient_accumulation_steps"]).backward()
                     step_loss.append(loss.detach())
+
+                if profiler is not None:
+                    profiler.step()
 
             if gradient_clipping_norm is not None:
                 nn.utils.clip_grad.clip_grad_norm_(
@@ -561,9 +690,9 @@ def main(
             epoch_losses.append(torch.mean(torch.stack(step_loss)))
 
         epoch_loss_mean = torch.stack(epoch_losses).mean()
-        if exp.ddp:
+        if lib.is_ddp():
             torch.distributed.all_reduce(epoch_loss_mean)
-            epoch_loss_mean = epoch_loss_mean / exp.world_size
+            epoch_loss_mean = epoch_loss_mean / world_size
 
         delu.cuda.free_memory()
         metrics = eval_fn(graphpfn_ema)
@@ -578,10 +707,15 @@ def main(
         )
         report["loss"] = epoch_loss_mean.item()
 
-        exp.save_checkpoint(prepare_checkpoint(step))
+        save_checkpoint(prepare_checkpoint(step))
 
     # >>> finish
-    exp.finish()
+    lib.barrier()
+    report["time"] = timer.elapsed()
+    if lib.is_master_process():
+        lib.finish(output, report)
+    if lib.is_ddp():
+        torch.distributed.destroy_process_group()
     return report
 
 

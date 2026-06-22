@@ -1,0 +1,463 @@
+function = "bin.graphpfn.pretrain.main"
+
+[base_config]
+seed = 0
+amp = true
+n_steps = 10000
+n_gradient_accumulation_steps = 20
+epoch_size = 100
+gradient_clipping_norm = 1.0
+batch_size = 1
+
+[base_config.optimizer]
+type = "AdamW"
+lr = 0.001
+weight_decay = 0.1
+
+[base_config.evaluation_data]
+n_synthetic_per_gpu = 8
+
+[[base_config.evaluation_data.real]]
+
+[base_config.evaluation_data.real.data]
+cache = false
+path = "data/artnet-exp"
+setting = "transductive"
+internal_split_name = "RL"
+
+[base_config.evaluation_data.real.transform]
+seed = 0
+labels = false
+
+[base_config.evaluation_data.real.transform.features]
+cat_policy = "ordinal"
+num_policy = "quantile-normal"
+frac_policy = "quantile-uniform"
+
+[[base_config.evaluation_data.real]]
+
+[base_config.evaluation_data.real.data]
+cache = false
+path = "data/city-reviews"
+setting = "transductive"
+internal_split_name = "RL"
+
+[base_config.evaluation_data.real.transform]
+seed = 0
+labels = false
+
+[base_config.evaluation_data.real.transform.features]
+cat_policy = "ordinal"
+num_policy = "quantile-normal"
+frac_policy = "quantile-uniform"
+
+[[base_config.evaluation_data.real]]
+
+[base_config.evaluation_data.real.data]
+cache = false
+path = "data/tolokers-2"
+setting = "transductive"
+internal_split_name = "RL"
+
+[base_config.evaluation_data.real.transform]
+seed = 0
+labels = false
+
+[base_config.evaluation_data.real.transform.features]
+cat_policy = "ordinal"
+num_policy = "quantile-normal"
+frac_policy = "quantile-uniform"
+
+[[base_config.evaluation_data.real]]
+
+[base_config.evaluation_data.real.data]
+cache = false
+path = "data/artnet-views"
+setting = "transductive"
+internal_split_name = "RL"
+
+[base_config.evaluation_data.real.transform]
+seed = 0
+labels = true
+
+[base_config.evaluation_data.real.transform.features]
+cat_policy = "ordinal"
+num_policy = "quantile-normal"
+frac_policy = "quantile-uniform"
+
+[[base_config.evaluation_data.real]]
+
+[base_config.evaluation_data.real.data]
+cache = false
+path = "data/avazu-ctr"
+setting = "transductive"
+internal_split_name = "RL"
+
+[base_config.evaluation_data.real.transform]
+seed = 0
+labels = true
+
+[base_config.evaluation_data.real.transform.features]
+cat_policy = "ordinal"
+num_policy = "quantile-normal"
+frac_policy = "quantile-uniform"
+
+[base_config.evaluation_data.real.d_reduction]
+method = "pca"
+d = 64
+
+[[base_config.evaluation_data.real]]
+
+[base_config.evaluation_data.real.data]
+cache = false
+path = "data/city-roads-M"
+setting = "transductive"
+internal_split_name = "RL"
+
+[base_config.evaluation_data.real.transform]
+seed = 0
+labels = true
+
+[base_config.evaluation_data.real.transform.features]
+cat_policy = "ordinal"
+num_policy = "quantile-normal"
+frac_policy = "quantile-uniform"
+
+[[base_config.evaluation_data.real]]
+
+[base_config.evaluation_data.real.data]
+cache = false
+path = "data/hm-prices"
+setting = "transductive"
+internal_split_name = "RL"
+
+[base_config.evaluation_data.real.transform]
+seed = 0
+labels = true
+
+[base_config.evaluation_data.real.transform.features]
+cat_policy = "ordinal"
+num_policy = "quantile-normal"
+frac_policy = "quantile-uniform"
+
+[[base_config.evaluation_data.real]]
+
+[base_config.evaluation_data.real.data]
+cache = false
+path = "data/twitch-views"
+setting = "transductive"
+internal_split_name = "RL"
+
+[base_config.evaluation_data.real.transform]
+seed = 0
+labels = true
+
+[base_config.evaluation_data.real.transform.features]
+cat_policy = "ordinal"
+num_policy = "quantile-normal"
+frac_policy = "quantile-uniform"
+
+[base_config.prior.sanity_check]
+min_features = 4
+
+[base_config.prior.prior]
+_distribution_ = "choice"
+_shared_ = true
+
+[[base_config.prior.prior.values]]
+_type_ = "graph_then_attributes"
+
+[base_config.prior.prior.values.graph.n_nodes]
+_distribution_ = "log_uniform_int"
+min = 1000
+max = 5000
+_shared_ = true
+
+[base_config.prior.prior.values.graph.avg_degree]
+_distribution_ = "mixed_log_uniform"
+min_first = 1.5
+max_first = 100.0
+min_second = 100.0
+max_second = 500.0
+p_first = 0.5
+_shared_ = true
+
+[base_config.prior.prior.values.graph.sampler]
+_distribution_ = "choice"
+
+[[base_config.prior.prior.values.graph.sampler.values]]
+_type_ = "multi-level-sbm-with-pa"
+pa_max_degree = 2
+min_first_level_n_nodes = 64
+offdiagonal_coef = 0.1
+
+[base_config.prior.prior.values.graph.sampler.values.pa_nodes_ratio]
+_distribution_ = "uniform"
+min = 0.0
+max = 0.3
+
+[base_config.prior.prior.values.graph.sampler.values.n_first_level_subgraphs]
+_distribution_ = "uniform_int"
+min = 2
+max = 8
+
+[base_config.prior.prior.values.graph.sampler.values.first_level_degree_ratio]
+_distribution_ = "uniform"
+min = 0.05
+max = 0.95
+
+[base_config.prior.prior.values.graph.sampler.values.n_groups]
+_distribution_ = "uniform_int"
+min = 2
+max = 8
+
+[base_config.prior.prior.values.scm]
+_type_ = "gnn"
+
+[base_config.prior.prior.values.scm.base]
+_type_ = "mlp"
+
+[base_config.prior.prior.values.scm.base.n_features]
+_distribution_ = "uniform_int"
+_shared_ = true
+min = 4
+max = 100
+
+[base_config.prior.prior.values.scm.base.n_causes]
+_distribution_ = "meta_trunc_norm_log_scaled"
+min_mean = 1
+max_mean = 12
+min_std = 0.01
+max_std = 1.0
+lower_bound = 1
+round = true
+
+[base_config.prior.prior.values.scm.base.n_layers]
+_distribution_ = "meta_trunc_norm_log_scaled"
+min_mean = 1
+max_mean = 6
+min_std = 0.01
+max_std = 1.0
+lower_bound = 2
+round = true
+
+[base_config.prior.prior.values.scm.base.hidden_dim]
+_distribution_ = "meta_trunc_norm_log_scaled"
+min_mean = 5
+max_mean = 130
+min_std = 0.01
+max_std = 1.0
+lower_bound = 4
+round = true
+
+[base_config.prior.prior.values.scm.base.activation_type]
+_distribution_ = "choice"
+values = [
+    "tanh",
+    "leaky_relu",
+    "elu",
+    "identity",
+    "selu",
+    "silu",
+    "relu",
+    "softplus",
+    "relu6",
+    "hardtanh",
+    "sign",
+    "rbf",
+    "exp",
+    "sqrt_abs",
+    "unit_interval_indicator",
+    "sine",
+    "square",
+    "abs",
+    "random_fourier",
+]
+
+[base_config.prior.prior.values.scm.base.activation_type._runtime_]
+_distribution_ = "bernoulli"
+p = 0.5
+
+[base_config.prior.prior.values.scm.base.activation_type.weights]
+random_fourier = 10.0
+
+[base_config.prior.prior.values.scm.base.causes.strategy]
+_distribution_ = "choice"
+values = [
+    "normal",
+    "mixed",
+    "uniform",
+]
+
+[base_config.prior.prior.values.scm.base.causes.pre_sample_stats]
+_distribution_ = "choice"
+values = [
+    true,
+    false,
+]
+
+[base_config.prior.prior.values.scm.base.noise.std]
+_distribution_ = "meta_trunc_norm_log_scaled"
+min_mean = 0.0001
+max_mean = 0.3
+min_std = 0.01
+max_std = 1.0
+lower_bound = 0.0
+round = false
+
+[base_config.prior.prior.values.scm.base.noise.pre_sample_std]
+_distribution_ = "choice"
+values = [
+    true,
+    false,
+]
+
+[base_config.prior.prior.values.scm.base.init]
+scale_std_by_dropout = true
+
+[base_config.prior.prior.values.scm.base.init.std]
+_distribution_ = "meta_trunc_norm_log_scaled"
+min_mean = 0.01
+max_mean = 10.0
+min_std = 0.01
+max_std = 1.0
+lower_bound = 0.0
+round = false
+
+[base_config.prior.prior.values.scm.base.init.block_wise_dropout]
+_distribution_ = "choice"
+values = [
+    true,
+    false,
+]
+
+[base_config.prior.prior.values.scm.base.init.p_dropout]
+_distribution_ = "meta_beta"
+scale = 0.9
+min = 0.1
+max = 5.0
+
+[base_config.prior.prior.values.scm.base.causal.enabled]
+_distribution_ = "choice"
+values = [
+    true,
+    false,
+]
+
+[base_config.prior.prior.values.scm.base.causal.y_is_effect]
+_distribution_ = "choice"
+values = [
+    true,
+    false,
+]
+
+[base_config.prior.prior.values.scm.base.causal.in_clique]
+_distribution_ = "choice"
+values = [
+    true,
+    false,
+]
+
+[base_config.prior.prior.values.scm.base.causal.sort_features]
+_distribution_ = "choice"
+values = [
+    true,
+    false,
+]
+
+[base_config.prior.prior.values.scm.conv_type]
+_distribution_ = "choice"
+values = [
+    "gcn",
+    "sage-mean",
+    "sage-min",
+    "sage-max",
+    "gt",
+]
+
+[base_config.prior.prior.values.scm.graph_conv_ratio]
+_distribution_ = "choice"
+values = [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+]
+
+[base_config.prior.prior.values.scm.structural]
+lappe_k = 0
+
+[base_config.prior.prior.values.scm.structural.use_degree]
+_distribution_ = "choice"
+values = [
+    true,
+    false,
+]
+
+[base_config.prior.prior.values.scm.structural.use_pagerank]
+_distribution_ = "choice"
+values = [
+    true,
+    false,
+]
+
+[base_config.prior.prior.values.task]
+multiclass_type = "rank"
+p_ordered = 0.2
+p_reverse = 0.5
+
+[base_config.prior.prior.values.task._type_]
+_distribution_ = "choice"
+_shared_ = true
+values = [
+    "regression",
+    "binclass",
+    "multiclass",
+]
+
+[base_config.prior.prior.values.task.n_classes]
+_distribution_ = "uniform_int"
+min = 2
+max = 10
+
+[base_config.prior.prior.values.task.quantile]
+_distribution_ = "uniform"
+min = 0.01
+max = 0.99
+
+[base_config.prior.prior.values.postprocessing]
+p_cat = 0.2
+max_categories = 256
+permute_features = true
+permute_labels = true
+
+[base_config.prior.prior.values.train_ratio]
+_distribution_ = "uniform"
+min = 0.05
+max = 0.5
+_shared_ = true
+
+[base_config.sampler]
+batch_size = 1
+n_workers = 12
+prefetch_factor = 24
+verbose = true
+
+[base_config.model.edge_head]
+
+[base_config.ema]
+decay = 0.98
+
+[base_config.lr_scheduler]
+n_warmup_steps = 1000
+scheduler = "cosine"
+
+[base_config.ssl.edge]
+coef = 0.1

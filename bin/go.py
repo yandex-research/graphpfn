@@ -3,6 +3,8 @@ import sys
 from pathlib import Path
 from typing import cast
 
+import torch
+
 import bin.evaluate
 import bin.tune
 import lib
@@ -16,6 +18,8 @@ def main(
     *,
     continue_: bool = False,
     force: bool = False,
+    tiny: bool = False,
+    profiler: torch.profiler.profile | None = None,
 ):
     config = Path(config).resolve()
 
@@ -63,7 +67,9 @@ def main(
             pretrain_config["base_config"],
             force=force,
             continue_=continue_,
+            tiny=tiny,
             output=config.with_suffix(""),
+            profiler=profiler,
         )
         return
 
@@ -84,5 +90,6 @@ if __name__ == "__main__":
     parser.add_argument("--n_seeds", type=int, default=_DEFAULT_N_SEEDS)
     parser.add_argument("--continue", action="store_true", dest="continue_")
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--tiny", action="store_true")
 
     main(**vars(parser.parse_args(sys.argv[1:])))

@@ -1,12 +1,11 @@
-# LightGBM
-
-# TODO: upload updated env to nirvana
+"""
+TODO: update according to new lib/graph/data.py and lib/graph/pearl.py
+"""
 
 import copy
 import os
 from pathlib import Path
-from typing import Any
-from typing_extensions import TypedDict
+from typing import Any, NotRequired
 
 import delu
 import dgl
@@ -14,11 +13,10 @@ import lightgbm
 import numpy as np
 import pandas as pd
 import torch
-from typing import NotRequired
-from torch import Tensor
-from torch import nn
 from lightgbm import LGBMClassifier, LGBMRegressor
 from loguru import logger
+from torch import Tensor, nn
+from typing_extensions import TypedDict
 
 import lib
 from lib import KWArgs
@@ -36,7 +34,7 @@ class PEARL(nn.Module):
     def __init__(
         self,
         *,
-        output_dim: int,
+        d_output: int,
         batch_size: int,
         backbone: dict,
         n_features: int = 1,
@@ -79,12 +77,12 @@ class PEARL(nn.Module):
                     lib.graph.deep.NORM_MODULES[backbone["norm_name"]](d_hidden),
                     nn.Linear(d_hidden, d_hidden),
                     lib.graph.deep.get_activation_module(backbone["activation"]),
-                    nn.Linear(d_hidden, output_dim),
+                    nn.Linear(d_hidden, d_output),
                 )
             ),
             "linear": (
                 nn.Sequential(
-                    nn.Linear(d_hidden, output_dim),
+                    nn.Linear(d_hidden, d_output),
                 )
             ),
         }[inp_out_type]
@@ -121,6 +119,9 @@ def main(
     output = Path(output)
     delu.random.seed(config["seed"])
     report = lib.create_report(main, config)  # type: ignore[code]
+
+    timer = delu.tools.Timer()
+    timer.run()
 
     # >>> data
     dataset = lib.graph.data.build_dataset(**config["data"])
@@ -221,15 +222,14 @@ def main(
 
     # >>> training
     logger.info("training...")
-    with delu.Timer() as timer:
-        model.fit(
-            X["train"],
-            dataset.data["labels"][dataset.data["masks"]["train"]],
-            eval_set=[(X["val"], dataset.data["labels"][dataset.data["masks"]["val"]])],
-            **config["fit"],
-            **fit_extra_kwargs,
-        )
-    report["time"] = str(timer)
+    model.fit(
+        X["train"],
+        dataset.data["labels"][dataset.data["masks"]["train"]],
+        eval_set=[(X["val"], dataset.data["labels"][dataset.data["masks"]["val"]])],
+        **config["fit"],
+        **fit_extra_kwargs,
+    )
+
     report["best_iteration"] = model.booster_.best_iteration
 
     # >>> finish
@@ -246,6 +246,8 @@ def main(
         report["prediction_type"],  # type: ignore[code]
     )
     lib.dump_summary(output, lib.summarize(report))
+
+    report["time"] = timer.elapsed()
     lib.finish(output, report)
     return report
 

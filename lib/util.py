@@ -2,6 +2,7 @@ import argparse
 import datetime
 import enum
 import functools
+import hashlib
 import importlib
 import inspect
 import io
@@ -11,30 +12,43 @@ import shutil
 import statistics
 import subprocess
 import sys
-import tempfile
-import time
 import tomllib
 from collections.abc import Callable
 from copy import deepcopy
 from pathlib import Path
 from pprint import pprint
-from typing import Any, TypeVar, cast
+from typing import (
+    Any,
+    NotRequired,
+    Required,
+    TypeVar,
+    cast,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
-import delu
 import numpy as np
 import tomli_w
 import yaml
 from loguru import logger
 from optuna import Study
 from optuna.trial import TrialState
-from typing_extensions import TypedDict  # noqa: UP035
 
-# NOTE: this is internal infrastructure, ignore it
 try:
-    from dev.infra.util import init_exp_tracker, load_snapshot, save_snapshot
+    from dev.infra import save_snapshot, tracker
 
     INTERNAL_INFRA = True
 except ImportError:
+    from types import SimpleNamespace
+
+    tracker = SimpleNamespace(
+        init=lambda *a, **kw: None,
+        log=lambda *a, **kw: None,
+        get_uid=lambda: None,
+        finish=lambda: None,
+    )
+    save_snapshot = lambda *a, **kw: None  # noqa: E731
     INTERNAL_INFRA = False
 
 # NOTE
@@ -59,7 +73,7 @@ def _torch():
 # ==================================================================================
 # Const
 # ==================================================================================
-WORST_SCORE = -999999.0  # TODO: replace it with None?
+WORST_SCORE = -999999.0
 
 
 # ==================================================================================
@@ -103,261 +117,6 @@ class Score(enum.Enum):
 
 
 # ==================================================================================
-# `Experiment` class
-# ==================================================================================
-# The following class largely duplicates the "`main` function" and
-# "IO for the output directory" sections below. However, the sections below were not
-# created to handle long pretrain runs, so we've needed to rewrite them, and it was
-# easier to create new class from the scratch.
-# TODO: refactor to have no duplication
-T = TypeVar("T")
-
-
-class Checkpoint(TypedDict):
-    run_uid: str | None  # internal infrastructure, ignore it
-    step: int
-    report: JSONDict
-    model: dict[str, Any]
-    model_ema: dict[str, Any]
-    optimizer: dict[str, Any]
-    lr_scheduler: dict[str, Any] | None
-    random_state: dict[str, Any]
-    timer: delu.tools.Timer
-    extra: dict[str, Any]
-
-
-# TODO: ideally, support all features from original reports
-class Experiment:
-    def __init__(self) -> None:
-        self.finished = False
-        self.init_ddp()
-        self.init_loguru()
-
-        logger.info(f"Launching on {_torch().cuda.device_count()} devices")
-        logger.info(f"{INTERNAL_INFRA=}")
-
-    def init_ddp(self, backend="nccl"):
-        self.ddp = "RANK" in os.environ
-        self.rank = int(os.environ.get("RANK", 0))
-        self.world_size = int(os.environ.get("WORLD_SIZE", 1))
-        self.master_process = (not self.ddp) | (self.rank == 0)
-
-        if self.ddp:
-            self.device_id = int(os.environ["LOCAL_RANK"])
-            _torch().distributed.init_process_group(backend, rank=self.rank)
-            self.sync()
-        else:
-            self.device_id = 0
-
-    def init_loguru(self, log_master_only: bool = False, level: str = "INFO") -> None:
-        logger.remove()
-        if self.master_process or not log_master_only:
-            rank = get_rank()
-            logger.add(
-                sys.stderr,
-                format=f"<level>[{{level}} {rank=} {{time:HH:mm:ss}}] {{message}}</level>",
-                level=level,
-                enqueue=True,
-            )
-
-    def check[T](
-        self, config, output: None | str | Path, *, config_type: type[T] = dict
-    ) -> tuple[T, Path]:
-        """Load the config and infer the path to the output directory."""
-        # >>> Check paths.
-        if isinstance(config, str | Path):
-            # config is a path.
-            config = Path(config)
-            assert config.suffix == ".toml"
-            assert config.exists(), f"The config {config} does not exist"
-            if output is None:
-                # In this case, output is a directory located next to the config.
-                output = config.with_suffix("")
-            config = load_config(config)
-        else:
-            # config is already a dictionary.
-            assert output is not None, (
-                "If config is a dictionary, "
-                "then the `output` directory must be provided."
-            )
-        output = Path(output).resolve()
-
-        # >>> Check the config.
-        if config_type is dict:
-            pass
-        elif (
-            # If all conditions are True, config_type is assumed to be a TypedDict.
-            issubclass(config_type, dict)
-            and hasattr(config_type, "__required_keys__")
-            and hasattr(config_type, "__optional_keys__")
-        ):
-            # >>> Check the keys.
-            presented_keys = frozenset(config)
-            required_keys = config_type.__required_keys__  # type: ignore
-            optional_keys = config_type.__optional_keys__  # type: ignore
-            assert presented_keys >= required_keys, (
-                "The config is missing the following required keys:"
-                f" {', '.join(required_keys - presented_keys)}"
-            )
-            assert set(config) <= (required_keys | optional_keys), (
-                "The config has unknown keys:"
-                f" {', '.join(presented_keys - required_keys - optional_keys)}"
-            )
-
-        self.config = cast(T, config)
-        self.output = output
-        return self.config, self.output
-
-    def start(
-        self,
-        main_fn: Callable,
-        *,
-        continue_: bool = False,
-        force: bool = False,
-        exp_tracker: bool = True,
-    ) -> bool:
-        """Checks if caller should continue execution and inits (internal) exp tracker
-
-        Returns:
-            True if the caller should continue the execution.
-            False if the caller should immediately return.
-        """
-        self.sync()
-
-        should_start = _torch().tensor([True], device=f"cuda:{self.device_id}")
-        if self.master_process:
-            should_start[0] = self.check_start(
-                main_fn, continue_=continue_, force=force
-            )
-        if self.ddp:
-            _torch().distributed.broadcast(should_start, src=0)
-        should_start = should_start.item()
-
-        if should_start:
-            checkpoint = self.load_checkpoint() if continue_ else None
-            if self.master_process and exp_tracker and INTERNAL_INFRA:
-                self.exp_tracker = init_exp_tracker(
-                    self.config, self.output, checkpoint
-                )
-                print_config(self.config)
-                print()
-            else:
-                self.exp_tracker = None
-            seed = self.config["seed"] + self.rank
-            if checkpoint is not None:
-                seed += 8 * checkpoint["step"]
-            delu.random.seed(seed)
-        return should_start
-
-    def check_start(
-        self,
-        main_fn: Callable,
-        *,
-        continue_: bool = False,
-        force: bool = False,
-    ) -> bool:
-        """Create the output directory (if missing).
-
-        Returns:
-            True if the caller should continue the execution.
-            False if the caller should immediately return.
-        """
-        output = Path(self.output).resolve()
-
-        print_sep()
-        print(
-            f"{get_function_full_name(main_fn)}"
-            f" | {try_get_relative_path(output)}"
-            f" | {datetime.datetime.now()}"
-        )
-        print_sep()
-
-        if output.exists():
-            if force:
-                logger.warning("Removing the existing output")
-                shutil.rmtree(output)
-                _create_output(output)
-                return True
-            elif not continue_:
-                logger.warning("The output already exists!")
-                return False
-            elif is_done(output):
-                logger.info("Already done!\n")
-                return False
-            else:
-                logger.info("Continuing with the existing output")
-                _create_output(output, exist_ok=True)
-                return True
-        else:
-            logger.info("Creating the output")
-            _create_output(output)
-            return True
-
-    def save_checkpoint(self, checkpoint: Checkpoint) -> None:
-        self.sync()
-        if self.master_process:
-            info = {
-                k: v["score"] for k, v in checkpoint["report"]["metrics"].items()
-            } | {
-                "lr": (
-                    checkpoint["report"]["lr"][0]
-                    if "lr" in checkpoint["report"]
-                    else None
-                ),
-                "loss": (
-                    checkpoint["report"]["loss"]
-                    if "loss" in checkpoint["report"]
-                    else None
-                ),
-            }
-            logger.info(f"{info=}")
-            if self.exp_tracker:
-                self.exp_tracker.log(
-                    info,
-                    step=checkpoint["step"],
-                    flush=True,
-                )
-            _torch().save(checkpoint, self.output / "checkpoint.ckpt")
-            if INTERNAL_INFRA:
-                save_snapshot(self.output)
-        self.sync()
-
-    def load_checkpoint(self) -> Checkpoint | None:
-        self.sync()
-        if self.master_process:
-            if INTERNAL_INFRA:
-                load_snapshot(self.output)
-        self.sync()
-        path = self.output / "checkpoint.ckpt"
-        checkpoint = _torch().load(path) if path.exists() else None
-        self.sync()
-        return checkpoint
-
-    @property
-    def run_uid(self) -> str | None:
-        if self.exp_tracker:
-            return self.exp_tracker.uid
-        else:
-            return None
-
-    def sync(self):
-        if self.ddp:
-            _torch().distributed.barrier()
-
-    def finish(self) -> None:
-        if self.master_process:
-            _mark_as_done(self.output)
-        self.finished = True
-
-    def __del__(self):
-        logger.complete()
-        # TODO: finish exp_tracker
-        self.sync()
-        if self.ddp:
-            _torch().distributed.destroy_process_group()
-
-
-# ==================================================================================
 # `main` function
 # ==================================================================================
 # The following utilities expect that the `main` function
@@ -376,6 +135,44 @@ class Experiment:
 # * The return value is `report` -- a JSON-serializable Python dictionary
 #   with arbitrary information about the run.
 T = TypeVar("T")
+
+
+def _is_typeddict(tp: object) -> bool:
+    return (
+        isinstance(tp, type)
+        and issubclass(tp, dict)
+        and hasattr(tp, "__required_keys__")
+        and hasattr(tp, "__optional_keys__")
+    )
+
+
+def _check_typeddict_keys(config: dict, config_type: type, path: str = "") -> None:
+    presented_keys = frozenset(config)
+    required_keys = config_type.__required_keys__
+    optional_keys = config_type.__optional_keys__
+
+    prefix = f'At "{path}": ' if path else ""
+    assert presented_keys >= required_keys, (
+        f"{prefix}The config is missing the following required keys:"
+        f" {', '.join(required_keys - presented_keys)}"
+    )
+    assert set(config) <= (required_keys | optional_keys), (
+        f"{prefix}The config has unknown keys:"
+        f" {', '.join(presented_keys - required_keys - optional_keys)}"
+    )
+
+    hints = get_type_hints(config_type, include_extras=True)
+    for key, value in config.items():
+        if key not in hints or not isinstance(value, dict):
+            continue
+        inner_type = hints[key]
+        origin = get_origin(inner_type)
+        if origin is Required or origin is NotRequired:
+            inner_type = get_args(inner_type)[0]
+        if _is_typeddict(inner_type):
+            _check_typeddict_keys(
+                value, inner_type, path=f"{path}.{key}" if path else key
+            )
 
 
 def check[T](
@@ -410,26 +207,8 @@ def check[T](
     output = Path(output).resolve()
 
     # >>> Check the config.
-    if config_type is dict:
-        pass
-    elif (
-        # If all conditions are True, config_type is assumed to be a TypedDict.
-        issubclass(config_type, dict)
-        and hasattr(config_type, "__required_keys__")
-        and hasattr(config_type, "__optional_keys__")
-    ):
-        # >>> Check the keys.
-        presented_keys = frozenset(config)
-        required_keys = config_type.__required_keys__  # type: ignore
-        optional_keys = config_type.__optional_keys__  # type: ignore
-        assert presented_keys >= required_keys, (
-            "The config is missing the following required keys:"
-            f" {', '.join(required_keys - presented_keys)}"
-        )
-        assert set(config) <= (required_keys | optional_keys), (
-            "The config has unknown keys:"
-            f" {', '.join(presented_keys - required_keys - optional_keys)}"
-        )
+    if config_type is not dict and _is_typeddict(config_type):
+        _check_typeddict_keys(config, config_type)
 
     return cast(T, config), output
 
@@ -520,7 +299,7 @@ def _summarize_to_dict(report: JSONDict) -> JSONDict:
             summary[key] = deepcopy(report[key])
 
     if "time" in report:
-        summary["time"] = report["time"]
+        summary["time"] = str(datetime.timedelta(seconds=int(report["time"])))
     gpus = report.get("gpus")
     if gpus is not None and gpus:
         assert len(gpus) == 1 or all(x == gpus[0] for x in gpus)
@@ -536,12 +315,10 @@ def _summarize_to_dict(report: JSONDict) -> JSONDict:
 
     elif function in ["bin.evaluate.main", "bin.ensemble.main"]:
         reports = report["reports"]
-        # if function == 'bin.evaluate.main':  # TODO: fix this
-        #     summary['time-mean'] = str(
-        #         datetime.timedelta(
-        #             seconds=statistics.mean(x['time'] for x in reports)
-        #         )
-        #     )
+        if function == "bin.evaluate.main":
+            summary["average_time"] = str(
+                datetime.timedelta(seconds=statistics.mean(x["time"] for x in reports))
+            )
         summary["n_reports"] = len(reports)
         summary["scores"] = {
             part: float(statistics.mean(x["metrics"][part]["score"] for x in reports))
@@ -615,46 +392,8 @@ def run(function: Callable[..., None | JSONDict]) -> None | JSONDict:
     return function(**vars(parser.parse_args(sys.argv[1:])))
 
 
-_LAST_SNAPSHOT_TIME = None
-
-
 def backup(output: Path) -> None:
-    """A function for the internal infrastructure, ignore it."""
-    if env.is_local():
-        return
-
-    project_dir = env.get_project_dir()
-    if project_dir not in output.resolve().parents:
-        # The output is outside of the project directory
-        # (e.g. output may be a temporary directory).
-        return
-
-    relative_output = output.relative_to(project_dir)
-    for new_project_dir in [os.environ["TMP_OUTPUT_PATH"], os.environ["SNAPSHOT_PATH"]]:
-        new_output = new_project_dir / relative_output
-        with tempfile.TemporaryDirectory() as tmp:
-            # Copy the output before removing the existing backup.
-            tmp_output = Path(tmp) / new_output.name
-            shutil.copytree(output, tmp_output)
-            if new_output.exists():
-                # Remove the old backup.
-                shutil.rmtree(new_output)
-            new_output.parent.mkdir(exist_ok=True, parents=True)
-            tmp_output.rename(new_output)
-        if output.with_suffix(".toml").exists():
-            # Some scripts (e.g. go.py) produce configs during runs,
-            # so configs is a part of the result.
-            shutil.copyfile(
-                output.with_suffix(".toml"), new_output.with_suffix(".toml")
-            )
-
-    global _LAST_SNAPSHOT_TIME
-    if _LAST_SNAPSHOT_TIME is None or time.time() - _LAST_SNAPSHOT_TIME > 10 * 60:
-        import nirvana_dl.snapshot
-
-        nirvana_dl.snapshot.dump_snapshot()
-        _LAST_SNAPSHOT_TIME = time.time()
-        logger.info("The snapshot was saved")
+    save_snapshot(output, project_dir=env.get_project_dir(), extra_suffixes=[".toml"])
 
 
 def _get_running_path(output: str | Path) -> Path:
@@ -681,6 +420,14 @@ def is_done(output: str | Path) -> bool:
     # The report must be presented. Otherwise, an empty directory would be "done"
     # (for example, just after the creation of the output directory).
     return get_report_path(output).exists() and not _get_running_path(output).exists()
+
+
+def _get_deprecated_path(path: str | Path) -> Path:
+    return Path(path).joinpath("_DEPRECATED")
+
+
+def is_deprecated(path: str | Path) -> bool:
+    return _get_deprecated_path(path).exists()
 
 
 # ==================================================================================
@@ -726,8 +473,12 @@ def dump_summary(output: str | Path, summary: str) -> None:
     get_summary_path(output).write_text(summary)
 
 
+def get_predictions_path(output: str | Path) -> Path:
+    return Path(output) / "predictions.npz"
+
+
 def load_predictions(output: str | Path) -> dict[PartKey, np.ndarray]:
-    path = Path(output) / "predictions.npz"
+    path = get_predictions_path(output)
     assert path.exists(), f"The prediction file {path} does not exist"
     x = np.load(path)
     return {key: x[key] for key in x}
@@ -736,7 +487,21 @@ def load_predictions(output: str | Path) -> dict[PartKey, np.ndarray]:
 def dump_predictions(
     output: str | Path, predictions: dict[PartKey, np.ndarray]
 ) -> None:
-    np.savez(Path(output) / "predictions.npz", **predictions)  # type: ignore[arg-type]
+    np.savez(get_predictions_path(output), allow_pickle=True, **predictions)
+
+
+def get_stats_path(output: str | Path) -> Path:
+    return Path(output) / "stats.npz"
+
+
+def load_stats(output: str | Path) -> dict[str, np.ndarray]:
+    path = get_stats_path(output)
+    assert path.exists(), f"The stats file {path} does not exist"
+    return dict(np.load(path))
+
+
+def dump_stats(output: str | Path, stats: dict[str, np.ndarray]) -> None:
+    np.savez(get_stats_path(output), allow_pickle=True, **stats)
 
 
 def get_checkpoint_path(output: str | Path) -> Path:
@@ -749,6 +514,18 @@ def load_checkpoint(output: str | Path, **kwargs) -> Any:
 
 def dump_checkpoint(output: str | Path, checkpoint: Any, **kwargs) -> None:
     _torch().save(checkpoint, get_checkpoint_path(output), **kwargs)
+
+
+def get_byproducts_path(output: str | Path) -> Path:
+    return Path(output) / "byproducts.pt"
+
+
+def load_byproducts(output: str | Path, **kwargs) -> dict[str, Any]:
+    return _torch().load(get_byproducts_path(output), weights_only=False, **kwargs)
+
+
+def dump_byproducts(output: str | Path, byproducts: dict[str, Any], **kwargs) -> None:
+    _torch().save(byproducts, get_byproducts_path(output), **kwargs)
 
 
 def remove_tracked_files(output: str | Path) -> None:
@@ -825,30 +602,34 @@ def barrier() -> None:
         _torch().distributed.barrier()  # type: ignore
 
 
-def broadcast_int(item: int | None) -> int:
+def broadcast_bool(value: bool = False) -> bool:
     if not is_ddp():
-        assert item is not None
-        return item
-    item_tensor = _torch().zeros(1, device=get_device(), dtype=_torch().int32)
-    if is_master_process():
-        assert item is not None
-        item_tensor[0] = item
-    _torch().distributed.broadcast(item_tensor, src=0)  # type: ignore
-    item = int(item_tensor.item())
-    return item
+        return value
+    torch = _torch()
+    t = torch.tensor([value], dtype=torch.bool, device=f"cuda:{get_local_rank()}")
+    torch.distributed.broadcast(t, src=0)  # type: ignore
+    return t.item()  # type: ignore
 
 
-def allreduce_int(item: int) -> int:
+def allreduce_float(value: float, mode: str = "mean") -> float:
     if not is_ddp():
-        return item
-    item_tensor = _torch().tensor([item], device=get_device(), dtype=_torch().int32)
-    _torch().distributed.all_reduce(item_tensor)
-    item = int(item_tensor.item())
-    return item
+        return value
+    torch = _torch()
+    t = torch.tensor([value], dtype=torch.float64, device=f"cuda:{get_local_rank()}")
+    match mode:
+        case "mean":
+            torch.distributed.all_reduce(t)  # type: ignore
+            return t.item() / get_world_size()
+        case _:
+            raise ValueError(f"Unknown {mode=}")
 
 
-def configure_ddp(backend="nccl") -> None:
-    _torch().distributed.init_process_group(backend, rank=get_rank())  # type: ignore
+def configure_ddp(backend="nccl", timeout_minutes: int = 10) -> None:
+    _torch().distributed.init_process_group(  # type: ignore
+        backend,
+        timeout=datetime.timedelta(minutes=timeout_minutes),
+        rank=get_rank(),
+    )
     barrier()
 
 
@@ -857,14 +638,8 @@ def configure_ddp(backend="nccl") -> None:
 # ==================================================================================
 def get_device(rank: int | None = None):  # -> torch.device
     torch = _torch()
-    rank = rank or get_local_rank()
-    return torch.device(
-        f"cuda:{rank}"
-        if torch.cuda.is_available()
-        # else 'mps:0'
-        # if torch.mps.is_available()
-        else "cpu"
-    )
+    rank = get_local_rank() if rank is None else rank
+    return torch.device(f"cuda:{rank}" if torch.cuda.is_available() else "cpu")
 
 
 def is_dataparallel_available() -> bool:
@@ -904,13 +679,13 @@ class OutOfMemoryException(Exception):
         self.err = err
 
     def __str__(self):
-        return "OutOfMemoryException"
+        return str(self.err)
 
     def __repr__(self):
         return f"<OutOfMemoryException(err={self.err})>"
 
 
-def catch_oom_decorator():
+def catch_oom_exception():
     def decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
@@ -944,12 +719,29 @@ def random_float(a: float, b: float) -> float:
     return a + (b - a) * np.random.rand()
 
 
-def configure_logging(enqueue: bool = False):
+def make_seed(base: int, *keys: int | str) -> int:
+    """Derive a deterministic seed from a base seed and named keys.
+
+    Uses SHA-256 hashing to map (base, *keys) to a non-negative integer.
+    Different key tuples produce different seeds with overwhelming probability,
+    so callers don't need to reason about overlapping arithmetic ranges.
+
+    Examples:
+        >>> make_seed(42, "eval", 0, 3)          # eval dataset, rank=0, idx=3
+        >>> make_seed(42, "main", 1, 100)        # main RNG, rank=1, step=100
+        >>> make_seed(42, "sampler", 50)         # sampler workers, step=50
+        >>> make_seed(42, "sampler", 50) + 3     # sampler worker_id=3
+    """
+    data = f"{base}:{':'.join(map(str, keys))}"
+    return int(hashlib.sha256(data.encode()).hexdigest()[:8], 16)
+
+
+def configure_logging(enqueue: bool = True):
     logger.remove()
     rank = get_rank()
     logger.add(
         sys.stderr,
-        format=f"<level>[{{level}} {rank=} {{time:HH:mm:ss}}] {{message}}</level>",
+        format=f"<level>[{{level}} ({rank=} {{time:HH:mm:ss}})] {{message}}</level>",
         enqueue=enqueue,
     )
 
@@ -996,6 +788,25 @@ def are_valid_predictions(predictions: dict) -> bool:
     # predictions: dict[PartKey, np.ndarray]
     assert all(isinstance(x, np.ndarray) for x in predictions.values())
     return all(np.isfinite(x).all() for x in predictions.values())
+
+
+def _flatten_dict(d: dict, key_prefix: str, result: dict) -> None:
+    for k, v in d.items():
+        new_k = f"{key_prefix}.{k}" if key_prefix else k
+        if isinstance(v, dict):
+            _flatten_dict(v, new_k, result)
+        else:
+            if result.setdefault(new_k, v) is not v:
+                RuntimeError(
+                    "Different parts of the dictionary resulted"
+                    f' in the same flat key "{new_k}"'
+                )
+
+
+def flatten_dict(d: dict[str, Any]) -> dict[str, Any]:
+    flat_d: dict[str, Any] = {}
+    _flatten_dict(d, "", flat_d)
+    return flat_d
 
 
 def import_(qualname: str) -> Any:
@@ -1077,41 +888,45 @@ def get_default_metrics() -> dict[PartKey, dict[str, float]]:
     return {part: {"score": WORST_SCORE} for part in DATA_PARTS}
 
 
-def backup_output(output: Path) -> None:
-    """
-    A function for the internal infrastructure, ignore it.
-    """
-    backup_dir = os.environ.get("TMP_OUTPUT_PATH")
-    snapshot_dir = os.environ.get("SNAPSHOT_PATH")
-    if backup_dir is None:
-        assert snapshot_dir is None
-        return
-    assert snapshot_dir is not None
+# ==================================================================================
+# Optuna
+# ==================================================================================
+def dsp_log_prior(kernel_params: Any) -> Any:
+    """Dimensionality-Scaled Prior for `GPSampler` (Hvarfner et al., ICML 2024)."""
+    import math
 
-    try:
-        relative_output_dir = output.relative_to(PROJECT_DIR)
-    except ValueError:
-        return
+    torch = _torch()
 
-    for dir_ in [backup_dir, snapshot_dir]:
-        new_output = dir_ / relative_output_dir
-        prev_backup_output = new_output.with_name(new_output.name + "_prev")
-        new_output.parent.mkdir(exist_ok=True, parents=True)
-        if new_output.exists():
-            new_output.rename(prev_backup_output)
-        shutil.copytree(output, new_output)
-        # the case for evaluate.py which automatically creates configs
-        if output.with_suffix(".toml").exists():
-            shutil.copyfile(
-                output.with_suffix(".toml"), new_output.with_suffix(".toml")
-            )
-        if prev_backup_output.exists():
-            shutil.rmtree(prev_backup_output)
+    # --- Lengthscale prior: LogNormal(mu, sigma) ---
+    # mu scales with D so the median lengthscale grows as sqrt(D),
+    # matching the expected inter-point distance in a D-dimensional unit hypercube.
+    LENGTHSCALE_MU_BASE = math.sqrt(2)  # base location from the paper
+    LENGTHSCALE_SIGMA = math.sqrt(3)  # wide spread to allow optimizer flexibility
 
-    global _LAST_SNAPSHOT_TIME
-    if _LAST_SNAPSHOT_TIME is None or time.time() - _LAST_SNAPSHOT_TIME > 10 * 60:
-        import nirvana_dl.snapshot  # type: ignore[code]
+    # --- Kernel scale prior ---
+    # The paper fixes output scale to 1 (Y is standardized, so no learned scale needed).
+    # We approximate this with a tight quadratic penalty
+    # instead of patching the optimizer.
+    KERNEL_SCALE_TARGET = 1.0
+    KERNEL_SCALE_PENALTY = 100.0  # high penalty ≈ effectively fixing the value
 
-        nirvana_dl.snapshot.dump_snapshot()
-        _LAST_SNAPSHOT_TIME = time.time()
-        print("The snapshot was saved!")
+    # --- Noise prior: LogNormal(mu, sigma) ---
+    # Favors small noise (median ≈ exp(-4) ≈ 0.018) since Y is standardized.
+    NOISE_MU = -4.0
+    NOISE_SIGMA = 1.0
+
+    D = len(kernel_params.inverse_squared_lengthscales)
+    lengthscales = 1.0 / torch.sqrt(kernel_params.inverse_squared_lengthscales)
+
+    mu = LENGTHSCALE_MU_BASE + math.log(D) * 0.5
+    log_l = torch.log(lengthscales)
+    lengthscale_prior = (-log_l - 0.5 * ((log_l - mu) / LENGTHSCALE_SIGMA) ** 2).sum()
+
+    kernel_scale_prior = (
+        -KERNEL_SCALE_PENALTY * (kernel_params.kernel_scale - KERNEL_SCALE_TARGET) ** 2
+    )
+
+    log_noise = torch.log(kernel_params.noise_var)
+    noise_prior = -log_noise - 0.5 * ((log_noise - NOISE_MU) / NOISE_SIGMA) ** 2
+
+    return lengthscale_prior + kernel_scale_prior + noise_prior

@@ -13,17 +13,23 @@ cache = false
 path = "data/artnet-views"
 setting = "transductive"
 add_self_loops = false
-num_policy = "noisy-quantile-normal"
-ratio_policy = [
+internal_split_name = "RL"
+
+[space.transform]
+labels = true
+
+[space.transform.features]
+seed = 0
+cat_policy = "one-hot"
+num_policy = "quantile-normal"
+frac_policy = [
     "_tune_",
     "categorical",
     [
-        "noisy-quantile-normal",
+        "quantile-normal",
         "none",
     ],
 ]
-cat_policy = "one-hot"
-internal_split_name = "RL"
 
 [space.model.backbone]
 type = "BaseGraphBackbone"

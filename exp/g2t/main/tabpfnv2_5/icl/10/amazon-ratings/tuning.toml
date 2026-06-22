@@ -1,0 +1,80 @@
+seed = 0
+function = "bin.g2t.g2t_fm.main"
+n_trials = 100
+sampler_type = "BruteForceSampler"
+
+[space]
+seed = 0
+patience = 16
+amp = true
+n_epochs = 0
+epoch_size = 10
+min_train_ratio = 0.75
+seq_len_pred = 1024
+finetune_mode = "full"
+
+[space.ensemble]
+shuffle_features = true
+shuffle_targets = true
+n_members = 10
+
+[space.tfm]
+name = "tabpfn"
+
+[space.tfm.config]
+version = "v2.5"
+
+[space.encodings.lappe]
+k = 14
+
+[space.encodings.degree]
+log = true
+
+[space.encodings.pagerank]
+log = true
+
+[space.nfa]
+num_modes = [
+    "mean",
+]
+
+[space.d_reduction]
+method = "pca"
+d = 64
+
+[space.data]
+cache = false
+path = "data/amazon-ratings"
+setting = "transductive"
+external_split_file = "split.npz"
+
+[space.transform]
+labels = false
+
+[space.transform.features]
+num_policy = "standard"
+
+[space.transform.encodings]
+num_policy = "quantile-normal"
+
+[space.transform.nfa]
+num_policy = "standard"
+
+[space.optimizer]
+type = "AdamW"
+lr = 0.0003
+weight_decay = 0.0
+
+[space.pearl]
+batch_size = 8
+d_output = 16
+
+[space.pearl.backbone]
+type = "BaseGraphBackbone"
+conv_name = "gcn"
+norm_name = "none"
+residual = false
+n_layers = 3
+d_hidden = 512
+dropout = 0.1
+activation = "gelu"

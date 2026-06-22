@@ -1,0 +1,42 @@
+function = "bin.graphpfn.evaluate.main"
+n_seeds = 10
+
+[base_config]
+amp = true
+checkpoint_name = "hf://eremeev-d/graphpfn-1.3/graphpfn-adapters-1_3.pt"
+unfreeze_all = true
+n_steps = -1
+epoch_size = 10
+patience = 4
+seq_len_pred = 1024
+min_train_ratio = 0.75
+
+[base_config.ensemble]
+shuffle_features = false
+shuffle_targets = false
+n_members = 1
+
+[base_config.model]
+n_random_features = 8
+
+[base_config.model.edge_head]
+
+[base_config.data]
+cache = false
+path = "data/hm-prices"
+setting = "transductive"
+internal_split_name = "RL"
+
+[base_config.transform]
+labels = true
+
+[base_config.transform.features]
+seed = 0
+cat_policy = "ordinal"
+num_policy = "quantile-normal"
+frac_policy = "quantile-uniform"
+
+[base_config.optimizer]
+type = "AdamW"
+lr = 1.3912793292547576e-05
+weight_decay = 0.0

@@ -1,0 +1,70 @@
+function = "bin.g2t.g2t_fm.main"
+n_seeds = 10
+
+[base_config]
+patience = 16
+amp = true
+n_epochs = -1
+epoch_size = 10
+min_train_ratio = 0.75
+seq_len_pred = 1024
+finetune_mode = "full"
+
+[base_config.tfm]
+name = "limix"
+
+[base_config.ensemble]
+shuffle_features = true
+shuffle_targets = true
+n_members = 10
+
+[base_config.encodings.lappe]
+k = 14
+
+[base_config.encodings.degree]
+log = true
+
+[base_config.encodings.pagerank]
+log = true
+
+[base_config.nfa]
+num_modes = [
+    "mean",
+]
+
+[base_config.data]
+cache = false
+path = "data/facebook"
+setting = "transductive"
+external_split_file = "split.npz"
+
+[base_config.transform]
+labels = false
+
+[base_config.transform.features]
+num_policy = "standard"
+
+[base_config.transform.encodings]
+num_policy = "quantile-normal"
+
+[base_config.transform.nfa]
+num_policy = "standard"
+
+[base_config.optimizer]
+type = "AdamW"
+lr = 8.340500244230498e-06
+weight_decay = 0.0
+
+[base_config.pearl]
+batch_size = 8
+d_output = 16
+
+[base_config.pearl.backbone]
+type = "BaseGraphBackbone"
+conv_name = "gcn"
+norm_name = "none"
+residual = false
+n_layers = 3
+d_hidden = 512
+dropout = 0.1
+activation = "gelu"

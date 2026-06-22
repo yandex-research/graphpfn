@@ -1,5 +1,4 @@
 import math
-import os
 import statistics
 import warnings
 from functools import partial
@@ -13,7 +12,6 @@ import scipy
 import torch
 import torch.nn.functional as F
 from loguru import logger
-from sklearn.preprocessing import FunctionTransformer
 from torch import Tensor, nn
 from tqdm.auto import tqdm
 from typing_extensions import NotRequired, TypedDict  # noqa: UP035
@@ -28,8 +26,7 @@ from lib.ensemble import (
     reverse_target_perm,
 )
 from lib.graph.data import GraphDataset
-from lib.graphpfn.model import GraphPFN
-from lib.util import Checkpoint
+from lib.graphpfn.model import GraphPFN, resolve_checkpoint
 
 EvalOut = tuple[dict[str, Any], dict[PartKey, np.ndarray]]
 
@@ -45,9 +42,11 @@ class Config(TypedDict):
     seed: int
     amp: NotRequired[bool]  # Automatic mixed precision in bfloat16.
     data: KWArgs
+    transform: KWArgs
+    d_reduction: NotRequired[KWArgs]
 
     model: KWArgs
-    checkpoint_name: str | Path
+    checkpoint_name: str
     unfreeze_all: NotRequired[bool]
 
     n_steps: int
@@ -93,30 +92,6 @@ class CandidateQueue:
             [self._n_candidates, len(self._candidate_queue) - self._n_candidates]
         )
         return candidate_indices
-
-
-def preprocess_targets(
-    dataset: GraphDataset,
-) -> dict:
-    if dataset.task.is_regression:
-        dataset.data["labels"], regression_label_stats = lib.data.standardize_labels(
-            dataset.data["labels"], dataset.data["masks"]
-        )
-        # Can be replaced with something else
-        target_transform = FunctionTransformer(func=None)
-        dataset.data["labels"] = (
-            target_transform.transform(dataset.data["labels"].reshape(-1, 1))
-            .astype(np.float32)
-            .squeeze()
-        )
-    else:
-        regression_label_stats = None
-        target_transform = None
-
-    return {
-        "target_transform": target_transform,
-        "regression_label_stats": regression_label_stats,
-    }
 
 
 def preprocess_features(
@@ -199,8 +174,6 @@ def evaluate(
                 y_train=y_train_transformed,
                 train_mask=dataset.data["masks"]["train"],
                 task_type=dataset.task.type_,
-                checkpointing=False,
-                batched_attn=(dataset.size() >= 2**16 - 1),
             )
 
         member_pred = out["predictions"]
@@ -220,9 +193,8 @@ def evaluate(
 
     if regression_label_stats is not None:
         pred_transform = (  # noqa: E731
-            lambda tensor: (
-                tensor * regression_label_stats.std + regression_label_stats.mean
-            )
+            lambda tensor: tensor * regression_label_stats.std
+            + regression_label_stats.mean
         )
         predictions = {
             k: pred_transform(torch.from_numpy(v).to(device)).cpu().numpy()  # pyright: ignore
@@ -278,8 +250,6 @@ def compute_loss(
             y_train=y_train_transformed[context_mask],
             train_mask=train_mask,
             task_type=dataset.task.type_,
-            checkpointing=True,
-            batched_attn=(dataset.size() >= 2**16 - 1),
         )
 
     preds = out["predictions"][dataset.data["masks"]["train"]][batch_mask]
@@ -298,15 +268,20 @@ def main(
     output: str | Path,
     *,
     force: bool = False,
-    continue_: bool = False,
 ) -> None | lib.JSONDict:
     # >>> start
-    exp = lib.Experiment()
-    config, output = exp.check(config, output, config_type=Config)
-    if not exp.start(main, force=force, continue_=continue_, exp_tracker=False):
+    lib.configure_logging()
+
+    config, output = lib.check(config, output, config_type=Config)
+    if not lib.start(main, output, force=force):
         return None
 
-    # TODO: clean up this?
+    output = Path(output)
+
+    lib.print_config(config)
+    print()
+    delu.random.seed(config["seed"])
+
     warnings.filterwarnings(
         "ignore", message=".*pkg_resources is deprecated as an AP.*"
     )
@@ -316,33 +291,44 @@ def main(
     )
     warnings.filterwarnings("ignore", category=FutureWarning)
 
-    output = Path(output)
-    device = lib.get_device(exp.device_id)  # TODO: refactor to exp.device
+    device = lib.get_device()
     report = lib.create_report(main, config)
-    timer = delu.tools.Timer()
-
-    assert not exp.ddp, "You do not need >1 GPU for inference..."
 
     # For memory footprint benchmarking
     delu.cuda.free_memory()
     torch.cuda.synchronize()
-    torch.cuda.reset_peak_memory_stats(device)
+    for idx in range(torch.cuda.device_count()):
+        torch.cuda.reset_peak_memory_stats(torch.device(f"cuda:{idx}"))
+
+    timer = delu.tools.Timer()
+    timer.run()
 
     # >>> dataset
     dataset_timer = delu.tools.Timer()
     dataset_timer.run()
 
-    dataset = lib.graph.data.build_dataset(**config["data"])
-    assert dataset.task.is_transductive
-
-    prediction_type = "labels" if dataset.task.is_regression else "probs"
-    preprocess_targets_results = preprocess_targets(dataset)
-    regression_label_stats = preprocess_targets_results["regression_label_stats"]
-    features = preprocess_features(dataset)
+    dataset = lib.graph.data.GraphDataset.from_dir(**config["data"])
+    features = lib.graph.data.transform_features(
+        dataset.features, dataset.task, **config["transform"]["features"]
+    )
+    features = lib.graph.data.apply_d_reduction(
+        features,
+        dataset.task,
+        **config.get("d_reduction", {}),
+    )
+    dataset.data.update(features)  # type: ignore
+    regression_label_stats = lib.graph.data.prepare_labels(
+        dataset, config["transform"]["labels"]
+    )
 
     dataset = dataset.to_torch(device)
-    features = torch.tensor(features, device=device)
-    y_train = dataset.data["labels"][dataset.data["masks"]["train"]].to(
+    features = lib.graph.data.flatten_features(dataset.features)
+    assert features is not None
+    features = lib.graph.data.drop_constant_features(
+        features,
+        dataset.data["masks"]["train"],  # type: ignore
+    )
+    y_train = dataset.data["labels"][dataset.data["masks"]["train"]].to(  # type: ignore
         dtype=torch.float32, device=device
     )
 
@@ -361,26 +347,16 @@ def main(
     report["dataset_time"] = str(dataset_timer.elapsed())
 
     # >>> model
-    # TODO: double-check edge head
-    if config["checkpoint_name"] != "none":
-        checkpoint = torch.load(
-            Path("checkpoints") / f"{config['checkpoint_name']}.ckpt"
-        )
-        if "model_ema" not in checkpoint:
-            logger.error("Loading model instead of model_ema")
-            state_dict = checkpoint["model"]
-        else:
-            state_dict = {
-                k[7:]: v
-                for k, v in checkpoint["model_ema"].items()
-                if k.startswith("module.")
-            }
+    checkpoint_name = config["checkpoint_name"]
+    if checkpoint_name != "none":
+        checkpoint = torch.load(resolve_checkpoint(checkpoint_name))
+        state_dict = checkpoint["state_dict"]
     else:
-        checkpoint = None
         state_dict = None
 
     graphpfn = GraphPFN(**config.get("model", dict())).to(device)
     if state_dict is not None:
+        assert all([k in graphpfn.state_dict() for k in state_dict.keys()])
         graphpfn.load_state_dict(state_dict, strict=False)
 
     if config.get("unfreeze_all", True):
@@ -433,16 +409,15 @@ def main(
         graph=dataset.data["graph"],
         features=features,
         y_train=y_train,
-        prediction_type=prediction_type,
+        prediction_type="labels" if dataset.task.is_regression else "probs",
         regression_label_stats=regression_label_stats,
         device=device,
         amp_enabled=amp_enabled,
         ensemble=ensemble,
     )
 
-    def prepare_checkpoint(step: int) -> Checkpoint:
+    def prepare_checkpoint(step: int) -> dict:
         return {
-            "run_uid": exp.run_uid if exp.master_process else None,
             "step": step,
             "report": report,
             "timer": timer,
@@ -454,18 +429,14 @@ def main(
             "extra": dict(),
         }
 
-    timer = delu.tools.Timer()
-
     # >>> train loop
-
-    timer.run()
 
     step = 0
     early_stopping = delu.tools.EarlyStopping(config["patience"], mode="max")
     report["train"] = {"metrics": {"val": {"score": -math.inf}}}
 
     if config["n_steps"] == 0:
-        exp.save_checkpoint(prepare_checkpoint(step))
+        lib.dump_checkpoint(output, prepare_checkpoint(step))
 
     while config["n_steps"] == -1 or step < config["n_steps"]:
         print(f"[...] {output} | {timer}")
@@ -527,7 +498,7 @@ def main(
             print("🌸 New best epoch! 🌸")
             report["train"]["best_step"] = step
             report["train"]["metrics"] = metrics
-            exp.save_checkpoint(prepare_checkpoint(step))
+            lib.dump_checkpoint(output, prepare_checkpoint(step))
 
         early_stopping.update(metrics["val"]["score"])
         if early_stopping.should_stop() or not lib.are_valid_predictions(predictions):
@@ -535,22 +506,24 @@ def main(
 
         print()
 
-    report["time"] = timer.elapsed()
-
     # >>> finish
-    graphpfn.load_state_dict(exp.load_checkpoint()["model"])
+    graphpfn.load_state_dict(lib.load_checkpoint(output)["model"])
     logger.info("Final Eval")
     inference_timer = delu.tools.Timer()
     inference_timer.run()
     report["metrics"], _ = eval_fn(graphpfn)
     report["inference_time"] = str(inference_timer.elapsed())
-    report["max_memory_allocated_bytes"] = torch.cuda.max_memory_allocated(device)
-    # to free-up space
+    report["max_memory_allocated_bytes"] = sum(
+        [
+            torch.cuda.max_memory_allocated(torch.device(f"cuda:{idx}"))
+            for idx in range(torch.cuda.device_count())
+        ]
+    )
     if config["seed"] > 0:
-        os.remove(output / "checkpoint.ckpt")
-    exp.finish()
-    lib.dump_summary(output, lib.summarize(report))
-    lib.print_summary(output)
+        lib.get_checkpoint_path(output).unlink()
+
+    report["time"] = timer.elapsed()
+    lib.finish(output, report)
     return report
 
 

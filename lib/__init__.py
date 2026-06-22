@@ -1,13 +1,10 @@
-from . import (
-    data as data,
-    deep as deep,
-    ensemble as ensemble,
-    env as env,
-    graph as graph,
-    graphpfn as graphpfn,
-    limix as limix,
-    metrics as metrics,
-    tfm as tfm,
-    util as util,
-)
+from . import data as data
+from . import deep as deep
+from . import ensemble as ensemble
+from . import env as env
+from . import graph as graph
+from . import graphpfn as graphpfn
+from . import metrics as metrics
+from . import tfm as tfm
+from . import util as util
 from .util import *  # noqa: F403

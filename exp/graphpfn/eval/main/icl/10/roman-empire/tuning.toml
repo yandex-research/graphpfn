@@ -1,0 +1,46 @@
+seed = 0
+n_trials = 100
+sampler_type = "BruteForceSampler"
+function = "bin.graphpfn.evaluate.main"
+
+[space]
+seed = 0
+amp = true
+checkpoint_name = "hf://eremeev-d/graphpfn-1.3/graphpfn-adapters-1_3.pt"
+unfreeze_all = true
+n_steps = 0
+epoch_size = 10
+patience = 4
+seq_len_pred = 1024
+min_train_ratio = 0.75
+
+[space.ensemble]
+shuffle_features = true
+shuffle_targets = true
+n_members = 10
+
+[space.model]
+n_random_features = 8
+
+[space.model.edge_head]
+
+[space.d_reduction]
+method = "pca"
+d = 64
+
+[space.data]
+cache = false
+path = "data/roman-empire"
+setting = "transductive"
+external_split_file = "split.npz"
+
+[space.transform]
+labels = false
+
+[space.transform.features]
+num_policy = "standard"
+
+[space.optimizer]
+type = "AdamW"
+lr = 0.0003
+weight_decay = 0.0

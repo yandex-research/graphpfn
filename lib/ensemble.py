@@ -178,11 +178,15 @@ class ColumnSubsampler:
 # >>> Ensemble Transform Functions
 
 
-def apply_feature_transform(features: Tensor, member: EnsembleMember) -> Tensor:
-    if member["column_indices"] is not None:
-        features = features[:, member["column_indices"]]
+def apply_feature_transform(
+    features: Tensor | list[Tensor], member: EnsembleMember
+) -> Tensor:
+    if isinstance(features, list):
+        features = torch.cat(features, dim=-1)
     if member["feature_perm"] is not None:
         features = features[:, member["feature_perm"]]
+    if member["column_indices"] is not None:
+        features = features[:, member["column_indices"]]
     return features
 
 
@@ -216,6 +220,7 @@ class Ensemble:
         n_features: int,
         n_classes: int | None,
         *,
+        feature_group_sizes: list[int] | None = None,
         shuffle_features: bool = True,
         shuffle_targets: bool = True,
         max_columns: int | None = None,
@@ -231,11 +236,18 @@ class Ensemble:
             n_members: Total number of ensemble members (subtasks).
             n_features: Number of input features.
             n_classes: Number of classes (None for regression).
+            feature_group_sizes: Sizes of feature groups for group-aware shuffling.
+                When provided, features are shuffled within groups and group order
+                is permuted. Must sum to n_features. When None, all features are
+                treated as a single group.
             shuffle_features: Whether to randomly permute features.
             shuffle_targets: Whether to randomly permute target labels.
             max_columns: If n_features > max_columns, subsample to max_columns.
+                When shuffle_features is True, subsampling is done by truncation
+                after the group-aware permutation. When shuffle_features is False,
+                a random subset of columns is selected.
             ecoc_codebook: Precomputed ECOC codebook, shape (n_classes, n_members).
-            max_effective classes: Max number of classes in each ensemble member.
+            max_effective_classes: Max number of classes in each ensemble member.
             device: Torch device for ECOC codebook and permutations.
             seed: Random seed for reproducibility.
 
@@ -248,9 +260,15 @@ class Ensemble:
                 f"!= n_members={n_members}"
             )
 
+        if feature_group_sizes is not None:
+            assert sum(feature_group_sizes) == n_features
+        else:
+            feature_group_sizes = [n_features]
+
         self._n_members = n_members
         self._n_features = n_features
         self._n_classes = n_classes
+        self._feature_group_sizes = feature_group_sizes
         self._shuffle_features = shuffle_features
         self._shuffle_targets = shuffle_targets
         self._ecoc_codebook = ecoc_codebook
@@ -265,23 +283,44 @@ class Ensemble:
         self._members: list[EnsembleMember] = []
         self._build_members()
 
+    def _build_group_perm(
+        self, rng: torch.Generator, device: torch.device | None
+    ) -> Tensor:
+        group_sizes = self._feature_group_sizes
+        n_groups = len(group_sizes)
+
+        starts: list[int] = []
+        offset = 0
+        for size in group_sizes:
+            starts.append(offset)
+            offset += size
+
+        group_order = torch.randperm(n_groups, generator=rng, device=device)
+
+        perm_parts: list[Tensor] = []
+        for g_idx in group_order.tolist():
+            size = group_sizes[g_idx]
+            if size == 0:
+                continue
+            start = starts[g_idx]
+            intra_perm = torch.randperm(size, generator=rng, device=device)
+            group_indices = torch.arange(start, start + size, device=device)
+            perm_parts.append(group_indices[intra_perm])
+
+        return torch.cat(perm_parts)
+
     def _build_members(self) -> None:
         device = self._device
         rng = torch.Generator(device).manual_seed(self._seed)
 
         for i in range(self._n_members):
+            feature_perm: Tensor | None = None
+            if self._shuffle_features:
+                feature_perm = self._build_group_perm(rng, device)
+
             column_indices: Tensor | None = None
             if self._column_subsampler is not None:
                 column_indices = self._column_subsampler.sample_indices(rng)
-
-            feature_perm: Tensor | None = None
-            if self._shuffle_features:
-                n_cols = (
-                    column_indices.shape[0]
-                    if column_indices is not None
-                    else self._n_features
-                )
-                feature_perm = torch.randperm(n_cols, generator=rng, device=device)
 
             target_perm: Tensor | None = None
             if self._shuffle_targets and self._n_classes is not None:
@@ -366,6 +405,7 @@ def create_ensemble(
     n_features: int,
     n_classes: int | None,
     *,
+    feature_group_sizes: list[int] | None = None,
     shuffle_features: bool = True,
     shuffle_targets: bool = True,
     max_columns: int | None = None,
@@ -400,6 +440,7 @@ def create_ensemble(
         n_members=n_members,
         n_features=n_features,
         n_classes=n_classes,
+        feature_group_sizes=feature_group_sizes,
         shuffle_features=shuffle_features,
         shuffle_targets=shuffle_targets,
         max_columns=max_columns,

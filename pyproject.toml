@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "GraphPFN"
-version = "0.0.2"
-description = "GraphPFN"
+version = "0.0.3"
+description = "GraphPFN: A Prior-Data Fitted Graph Foundation Model"
 requires-python = "==3.12.9"
 dependencies = [
     # ==================================================================
@@ -37,6 +37,7 @@ dependencies = [
     "catboost==1.2.3",
     "xgboost==2.0.3",
     "flash-attn==2.8.3",
+    "huggingface-hub>=0.33.1"
 ]
 
 [dependency-groups]
@@ -61,16 +62,12 @@ dev = [
     "ruff>=0.12.0,<1",
     "seaborn>=0.13.2,<1",
     "setuptools>=80.9.0",
-    "huggingface-hub>=0.33.1"
-]
-tabpfn_25 = [
-    "tabpfn>=6.0.0",
-]
-mitra = [
-    "autogluon.tabular[mitra]",
 ]
 local = [
     "tabulate",
+]
+tabpfn = [
+    "tabpfn>=8.0.0"
 ]
 
 [tool.mypy]
@@ -88,6 +85,8 @@ exclude = [
     "cache",
     "data",
     "exp",
+    "dev/exp",
+    "dev/*/exp",
     "local",
 ]
 # venv = ".venv"
@@ -95,7 +94,9 @@ venvPath = "."
 
 [tool.ruff]
 line-length = 88
-extend-exclude = ["vendor/**/*.py", "lib/limix", "lib/tabpfn"]
+extend-exclude = [
+    "vendor/**/*.py",
+]
 
 [tool.ruff.lint]
 extend-select = ["RUF", "UP", "E501", "E731"]
@@ -104,10 +105,14 @@ extend-select = ["RUF", "UP", "E501", "E731"]
 quote-style = "double"
 
 [tool.setuptools]
-packages = ["lib", "bin"]
+packages = ["lib", "bin", "vendor"]
 
 [tool.uv]
+default-groups = ["dev"]
 package = true
+override-dependencies = [
+  "torch==2.4.*",
+]
 
 [tool.uv.extra-build-dependencies]
 flash-attn = [{ requirement = "torch", match-runtime = true }]

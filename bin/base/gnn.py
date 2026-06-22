@@ -1,30 +1,25 @@
 import datetime
 import math
-from functools import partial
 from pathlib import Path
 from typing import Any, Literal, NotRequired, TypedDict
 
 import delu
 import dgl
 import numpy as np
-import rtdl_num_embeddings
 import scipy
 import scipy.special
 import torch
 import torch.nn as nn
-import torch.utils.checkpoint
 import torch.utils.tensorboard
 from loguru import logger
 from torch import Tensor
 
 import lib
-import lib.data
 import lib.deep
-import lib.env
 import lib.graph.data
 import lib.graph.deep
-import lib.graph.util
 from lib import KWArgs, PartKey
+from lib.graph.pearl import PEARL
 
 
 class Model(nn.Module):
@@ -34,8 +29,8 @@ class Model(nn.Module):
         n_features: int,
         n_num_features: int,
         n_classes: None | int,
-        bin_edges: list[Tensor] | None,
         backbone: dict,
+        bin_edges: list[Tensor] | None = None,
         num_features: None | dict = None,
         inp_out_type: str = "mlp",
         pearl: dict | None = None,
@@ -63,7 +58,7 @@ class Model(nn.Module):
         # >>> PEARL
         if pearl is not None:
             self.pearl = PEARL(**pearl)
-            d_flat += pearl["output_dim"]
+            d_flat += pearl["d_output"]
         else:
             self.pearl = None
 
@@ -133,89 +128,6 @@ class Model(nn.Module):
         return x
 
 
-class PEARL(nn.Module):
-    def __init__(
-        self,
-        *,
-        output_dim: int,
-        batch_size: int,
-        backbone: dict,
-        n_features: int = 1,
-        inp_out_type: str = "mlp",
-        checkpoint_name: str = "pearl_random",
-        checkpointing: bool = False,
-    ):
-        super().__init__()
-        self.batch_size = batch_size
-        self.n_features = n_features
-        self.checkpointing = checkpointing
-
-        # >>> Input
-        d_hidden = backbone["d_hidden"]
-        dropout = backbone["dropout"]
-
-        self.input = {
-            "mlp": (
-                nn.Sequential(
-                    nn.Linear(n_features, d_hidden),
-                    nn.Dropout(dropout),
-                    lib.graph.deep.get_activation_module(backbone["activation"]),
-                    nn.Linear(d_hidden, d_hidden),
-                )
-            ),
-            "linear": (
-                nn.Sequential(
-                    nn.Linear(n_features, d_hidden),
-                )
-            ),
-        }[inp_out_type]
-
-        # >>> Backbone
-        self.backbone = lib.graph.deep.make_module(
-            **backbone,
-        )
-
-        # >>> Output
-        self.output = {
-            "mlp": (
-                nn.Sequential(
-                    lib.graph.deep.NORM_MODULES[backbone["norm_name"]](d_hidden),
-                    nn.Linear(d_hidden, d_hidden),
-                    lib.graph.deep.get_activation_module(backbone["activation"]),
-                    nn.Linear(d_hidden, output_dim),
-                )
-            ),
-            "linear": (
-                nn.Sequential(
-                    nn.Linear(d_hidden, output_dim),
-                )
-            ),
-        }[inp_out_type]
-
-        checkpoint_path = Path("checkpoints") / f"{checkpoint_name}.pt"
-        self.load_state_dict(torch.load(checkpoint_path))
-
-    def forward(
-        self,
-        graph: dgl.DGLGraph,
-    ) -> Tensor:
-        x_list = []
-
-        for _ in range(self.batch_size):
-            x = torch.randn(graph.num_nodes(), self.n_features, device=graph.device)
-            model = lambda graph, x: self.output(self.backbone(graph, self.input(x)))
-            if self.checkpointing:
-                model = partial(
-                    torch.utils.checkpoint.checkpoint,
-                    model,
-                    use_reentrant=False,
-                )
-            x = model(graph, x)
-            x_list.append(x)
-
-        return torch.stack(x_list, dim=-1).mean(-1)
-
-
 class Config(TypedDict):
     seed: int
     data: KWArgs
@@ -223,8 +135,8 @@ class Config(TypedDict):
     optimizer: KWArgs
     n_steps: int
     patience: int
-    bins: NotRequired[KWArgs]
     amp_dtype: NotRequired[Literal["bfloat16", "float16"]]
+    transform: lib.graph.data.TransformConfig
 
 
 def main(
@@ -238,61 +150,43 @@ def main(
     if not lib.start(main, output, force=force):
         return None
 
-    lib.print_config(config)
+    lib.print_config(config)  # type: ignore
     print()
     delu.random.seed(config["seed"])
     device = lib.get_device()
     logger.info(f"Device: {device}")
-    report = lib.create_report(main, config)
+    report = lib.create_report(main, config)  # type: ignore
 
     # For memory footprint benchmarking
     delu.cuda.free_memory()
     torch.cuda.synchronize()
     torch.cuda.reset_peak_memory_stats(device)
 
+    timer = delu.tools.Timer()
+    timer.run()
+
     # >>> Data
     dataset_timer = delu.tools.Timer()
     dataset_timer.run()
 
-    dataset = lib.graph.data.build_dataset(**config["data"])
+    dataset = lib.graph.data.GraphDataset.from_dir(**config["data"])
     assert dataset.task.is_transductive
-
-    if dataset.task.is_regression:
-        dataset.data["labels"], regression_label_stats = (
-            lib.graph.data.standardize_labels(
-                dataset.data["labels"], dataset.data["masks"]
-            )
-        )
-    else:
-        regression_label_stats = None
-
-    dataset = dataset.to_torch(device)
-    dataset.data["labels"] = (
-        dataset.data["labels"].to(torch.long)
-        if dataset.task.is_classification
-        else dataset.data["labels"].to(torch.float)
+    features = lib.graph.data.transform_features(
+        dataset.features, dataset.task, **config["transform"]["features"]
     )
+    dataset.data.update(features)  # type: ignore
+    regression_label_stats = lib.graph.data.prepare_labels(
+        dataset, config["transform"]["labels"]
+    )
+    dataset = dataset.to_torch(device)
 
     report["dataset_time"] = str(dataset_timer.elapsed())
 
     # >>> Model
-    if "bins" in config:
-        _num_features_train = dataset.data["num_features"][
-            dataset.data["masks"]["train"]
-        ]
-        bin_edges = rtdl_num_embeddings.compute_bins(
-            _num_features_train,
-            **config["bins"],
-        )
-        logger.info(f"Bin counts: {[len(x) - 1 for x in bin_edges]}")
-    else:
-        bin_edges = None
-
     model = Model(
         n_features=dataset.n_features,
         n_num_features=dataset.n_num_features,
         n_classes=dataset.task.try_compute_n_classes(),
-        bin_edges=bin_edges,
         **config["model"],
     )
     report["n_parameters"] = lib.deep.get_n_parameters(model)
@@ -316,9 +210,8 @@ def main(
 
     step = 0
     training_log = []
-    timer = delu.tools.Timer()
     early_stopping = delu.tools.EarlyStopping(config["patience"], mode="max")
-    writer = torch.utils.tensorboard.SummaryWriter(output)
+    writer = torch.utils.tensorboard.SummaryWriter(output)  # type: ignore
 
     amp_dtype = config.get("amp_dtype")
     if amp_dtype == "bfloat16":
@@ -334,20 +227,21 @@ def main(
         amp_dtype = torch.float16
 
     grad_scaler = (
-        torch.amp.GradScaler(device.type) if amp_dtype is torch.float16 else None
+        torch.amp.GradScaler(device.type)  # type: ignore
+        if amp_dtype is torch.float16
+        else None
     )
     logger.info(f"AMP dtype: {amp_dtype}")
 
     graph = dataset.data["graph"].to(device)
     x_num = dataset.data["num_features"]
     x_other = []
-    for data_key in ["cat_features", "ratio_features"]:
+    for data_key in ["cat_features", "frac_features"]:
         if dataset.data[data_key] is not None:
             x_other.append(dataset.data[data_key])
     x_other = torch.cat(x_other, dim=1) if x_other else None
 
     @torch.autocast(device.type, dtype=amp_dtype, enabled=amp_dtype is not None)
-    @lib.catch_oom_decorator()
     def apply_model() -> Tensor:
         return model(graph, x_num, x_other).squeeze(-1).float()
 
@@ -392,7 +286,6 @@ def main(
         )
 
     print()
-    timer.run()
     while step < config["n_steps"]:
         step_start_time = timer.elapsed()
 
@@ -404,7 +297,7 @@ def main(
 
         loss = loss_fn(
             outputs[dataset.data["masks"]["train"]],
-            targets[dataset.data["masks"]["train"]],
+            targets[dataset.data["masks"]["train"]],  # type: ignore
         )
         if grad_scaler is None:
             loss.backward()
@@ -448,8 +341,9 @@ def main(
         if not lib.are_valid_predictions(predictions) or early_stopping.should_stop():
             break
 
-    report["time"] = timer.elapsed()
     report["max_memory_allocated_bytes"] = torch.cuda.max_memory_allocated(device)
+
+    report["time"] = timer.elapsed()
     lib.finish(output, report)
     return report
 

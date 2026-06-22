@@ -1,0 +1,43 @@
+function = "bin.graphpfn.evaluate.main"
+n_seeds = 10
+
+[base_config]
+amp = true
+checkpoint_name = "hf://eremeev-d/graphpfn-1.3/graphpfn-adapters-1_3.pt"
+unfreeze_all = true
+n_steps = -1
+epoch_size = 10
+patience = 4
+seq_len_pred = 1024
+min_train_ratio = 0.75
+
+[base_config.ensemble]
+shuffle_features = true
+shuffle_targets = false
+n_members = 10
+
+[base_config.model]
+n_random_features = 8
+
+[base_config.model.edge_head]
+
+[base_config.d_reduction]
+method = "pca"
+d = 64
+
+[base_config.data]
+cache = false
+path = "data/questions"
+setting = "transductive"
+external_split_file = "split.npz"
+
+[base_config.transform]
+labels = false
+
+[base_config.transform.features]
+num_policy = "standard"
+
+[base_config.optimizer]
+type = "AdamW"
+lr = 4.999998054699972e-06
+weight_decay = 0.0

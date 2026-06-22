@@ -1,0 +1,95 @@
+seed = 0
+function = "bin.g2t.g2t_fm.main"
+n_trials = 100
+sampler_type = "BruteForceSampler"
+
+[space]
+seed = 0
+patience = 16
+amp = true
+n_epochs = -1
+epoch_size = 10
+min_train_ratio = 0.75
+seq_len_pred = 1024
+finetune_mode = "full"
+
+[space.ensemble]
+shuffle_features = false
+shuffle_targets = false
+n_members = 1
+
+[space.tfm]
+name = "limix"
+
+[space.encodings.lappe]
+k = 14
+
+[space.encodings.degree]
+log = true
+
+[space.encodings.pagerank]
+log = true
+
+[space.nfa]
+
+[space.d_reduction]
+method = "pca"
+d = 64
+
+[space.data]
+cache = false
+path = "data/city-reviews"
+setting = "transductive"
+internal_split_name = "RL"
+
+[space.transform]
+labels = false
+
+[space.transform.features]
+seed = 0
+cat_policy = "ordinal"
+num_policy = "quantile-normal"
+frac_policy = "quantile-uniform"
+
+[space.transform.encodings]
+num_policy = "quantile-normal"
+
+[space.transform.nfa]
+seed = 0
+cat_policy = "ordinal"
+num_policy = "quantile-normal"
+frac_policy = "quantile-uniform"
+
+[space.optimizer]
+type = "AdamW"
+lr = [
+    "_tune_",
+    "categorical",
+    [
+        4.999998054699972e-06,
+        8.340500244230498e-06,
+        1.3912793292547576e-05,
+        2.320794010302052e-05,
+        3.871318040182814e-05,
+        6.457747804233804e-05,
+        0.00010772173118311912,
+        0.00017969068721868098,
+        0.00029974215431138873,
+        0.0005000000819563866,
+    ],
+]
+weight_decay = 0.0
+
+[space.pearl]
+batch_size = 8
+d_output = 16
+
+[space.pearl.backbone]
+type = "BaseGraphBackbone"
+conv_name = "gcn"
+norm_name = "none"
+residual = false
+n_layers = 3
+d_hidden = 512
+dropout = 0.1
+activation = "gelu"

@@ -10,6 +10,8 @@ import rtdl_revisiting_models
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.utils.checkpoint
+from loguru import logger
 from torch import Tensor
 from torch.nn import Parameter
 
@@ -891,8 +893,6 @@ class FTTransformerBackbone(nn.Module):
                             num_heads=attention_n_heads,
                             dropout=attention_dropout,
                             batch_first=True,
-                            # linformer_kv_compression_ratio=linformer_kv_compression_ratio,
-                            # linformer_kv_compression_sharing=linformer_kv_compression_sharing,
                         ),
                         "attention_residual_dropout": nn.Dropout(residual_dropout),
                         # >>> feed-forward
@@ -906,7 +906,7 @@ class FTTransformerBackbone(nn.Module):
                                     d_block, ffn_d_hidden * (2 if ffn_use_reglu else 1)
                                 ),
                             ),
-                            ("activation", _ReGLU() if ffn_use_reglu else nn.ReLU()),
+                            ("activation", _ReGLU() if ffn_use_reglu else nn.ReLU()),  # noqa: F821 # type: ignore
                             ("dropout", nn.Dropout(ffn_dropout)),
                             ("linear2", nn.Linear(ffn_d_hidden, d_block)),
                         ),
@@ -1199,8 +1199,10 @@ def default_zero_weight_decay_condition(
             | rtdl_num_embeddings.LinearReLUEmbeddings
             | _Periodic,
         )
-        or isinstance(module, PiecewiseLinearEmbeddingsV3)
-        and parameter_name in ("weight1", "bias1")
+        or (
+            isinstance(module, PiecewiseLinearEmbeddingsV3)
+            and parameter_name in ("weight1", "bias1")
+        )
     )
 
 
@@ -1249,10 +1251,10 @@ def make_optimizer(
     mechanic: bool = False,
     schedule_free: bool = False,
     **kwargs,
-) -> torch.optim.Optimizer:
+) -> torch.optim.Optimizer:  # type: ignore
     if type == "Shampoo":
         assert sam is None
-        return DistributedShampoo(
+        return DistributedShampoo(  # type: ignore  # noqa: F821
             **kwargs,
             betas=(0.9, 0.999),
             beta3=-1.0,
@@ -1260,11 +1262,11 @@ def make_optimizer(
             max_preconditioner_dim=8192,
             precondition_frequency=100,
             use_decoupled_weight_decay=True,
-            grafting_config=AdamGraftingConfig(
+            grafting_config=AdamGraftingConfig(  # type: ignore  # noqa: F821
                 beta2=0.999,
                 epsilon=1e-12,
             ),
-            precision_config=PrecisionConfig(),
+            precision_config=PrecisionConfig(),  # type: ignore  # noqa: F821
         )
 
     Optimizer = getattr(torch.optim, type)
@@ -1272,21 +1274,21 @@ def make_optimizer(
     return (
         Optimizer(**kwargs)
         if sam is None
-        else SAM(kwargs.pop("params"), Optimizer, **kwargs, **sam)
+        else SAM(kwargs.pop("params"), Optimizer, **kwargs, **sam)  # type: ignore  # noqa: F821
     )
 
 
-def get_lr(optimizer: torch.optim.Optimizer) -> float:
+def get_lr(optimizer: torch.optim.Optimizer) -> float:  # type: ignore
     return next(iter(optimizer.param_groups))["lr"]
 
 
-def set_lr(optimizer: torch.optim.Optimizer, lr: float) -> None:
+def set_lr(optimizer: torch.optim.Optimizer, lr: float) -> None:  # type: ignore
     for group in optimizer.param_groups:
         group["lr"] = lr
 
 
 def get_lr_scheduler(
-    optimizer: torch.optim.Optimizer,
+    optimizer: torch.optim.Optimizer,  # type: ignore
     n_warmup_steps: int,
     n_steps: int,
     scheduler: Literal["none", "cosine"],
@@ -1328,7 +1330,7 @@ def get_loss_fn(task_type: TaskType) -> Callable[..., Tensor]:
 
 
 def zero_grad_forward_backward(
-    optimizer: torch.optim.Optimizer,
+    optimizer: torch.optim.Optimizer,  # type: ignore
     step_fn: Callable[[Tensor], Tensor],  # step_fn: chunk_idx -> loss
     batch_idx: Tensor,
     chunk_size: int,
@@ -1374,3 +1376,45 @@ def zero_grad_forward_backward(
     if not chunk_size:
         raise RuntimeError("Not enough memory even for chunk_size=1")
     return cast(Tensor, loss), chunk_size
+
+
+# ======================================================================================
+# Gradient checkpointing
+# ======================================================================================
+def apply_dynamic_checkpointing(
+    module: nn.Module,
+    should_checkpoint_fn: Callable[..., bool],
+    submodule_filter_fn: Callable[[str, nn.Module], bool],
+    use_reentrant: bool = False,
+    verbose: bool = False,
+) -> None:
+    should_checkpoint_holder = [False]  # mutable holder for `should_checkpoint` flag
+
+    def check_should_checkpoint(_, args, kwargs):
+        should_checkpoint_holder[0] = should_checkpoint_fn(*args, **kwargs)
+        return args, kwargs
+
+    module.register_forward_pre_hook(check_should_checkpoint, with_kwargs=True)
+
+    def patch_submodule(submodule: nn.Module) -> None:
+        original_forward = submodule.forward
+        submodule.forward = lambda *args, **kwargs: (
+            torch.utils.checkpoint.checkpoint(
+                original_forward,
+                *args,
+                use_reentrant=use_reentrant,
+                **kwargs,
+            )
+            if should_checkpoint_holder[0] and torch.is_grad_enabled()
+            else original_forward(*args, **kwargs)
+        )
+
+    for name, submodule in module.named_modules():
+        if verbose:
+            logger.info(
+                f"Applying checkpoint: {submodule_filter_fn(name, submodule)!s:5} | "
+                f"{name} {submodule.__class__}"
+            )
+        if (submodule is module) or not submodule_filter_fn(name, submodule):
+            continue
+        patch_submodule(submodule)
