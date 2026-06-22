@@ -64,6 +64,3 @@ Evaluation results are saved in the same directory as the configuration file:
 - Model checkpoints
 - Training logs
 
-***
-
-Built with PriorLabs-TabPFN
