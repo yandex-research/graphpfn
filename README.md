@@ -1,10 +1,11 @@
 # GraphPFN
 
-This is the official repository of the "GraphPFN: A Prior-Data Fitted Graph Foundation Model" paper ([arXiv](https://arxiv.org/abs/2509.21489)). In this repository, we provide code for reproducing our experiments with GraphPFN, both pretraining and evaluation. See also the HuggingFace [page](https://huggingface.co/eremeev-d/graphpfn-1.3) for model weights.
+This is the official repository of the "GraphPFN: A Prior-Data Fitted Graph Foundation Model" ICML 2026 paper ([arXiv](https://arxiv.org/abs/2509.21489)). In this repository, we provide code for reproducing our experiments with GraphPFN, both pretraining and evaluation. See also the HuggingFace [page](https://huggingface.co/eremeev-d/graphpfn-1.3) for model weights.
 
 ## News
 
 - 2026-06-22: GraphPFN-1.3 released, featuring a refactored graph prior, native ECOC support, extended evaluation, and various other improvements!
+- 2026-04-30: GraphPFN [accepted](https://icml.cc/virtual/2026/poster/66511) to ICML 2026!
 - 2026-02-13: GraphPFN-1.2 released, featuring improved ICL performance, end-to-end dataset generation and more!
 - 2025-09-25: GraphPFN-1.0 released!
 
