@@ -440,24 +440,27 @@ class GraphPFNMLPModule(nn.Module):
         return x
 
 
-def resolve_checkpoint(name: str) -> Path:
+def resolve_checkpoint(
+    name: str,
+    *,
+    local_dir: str | Path | None = "checkpoints/graphpfn",
+) -> Path:
     if not name.startswith("hf://"):
-        return Path("checkpoints") / name
+        return Path(name)
     parts = name.removeprefix("hf://").split("/")
     repo_id = "/".join(parts[:2])
     filename = "/".join(parts[2:])
     from huggingface_hub import hf_hub_download
 
-    local_path = hf_hub_download(
-        repo_id=repo_id, filename=filename, local_dir="./checkpoints"
-    )
+    hf_hub_download(repo_id, "config.json", local_dir=local_dir)
+    local_path = hf_hub_download(repo_id, filename=filename, local_dir=local_dir)
     return Path(local_path)
 
 
 def load_graphpfn(checkpoint: str | Path, **model_kwargs: KWArgs) -> GraphPFN:
     model = GraphPFN(**model_kwargs)  # type: ignore
     path = resolve_checkpoint(checkpoint) if isinstance(checkpoint, str) else checkpoint
-    state = torch.load(path, map_location="cpu", weights_only=True)
+    state = torch.load(path, map_location="cpu", weights_only=True)["state_dict"]
     assert all([k in model.state_dict() for k in state.keys()])
-    model.load_state_dict(state["state_dict"], strict=False)
+    model.load_state_dict(state, strict=False)
     return model
