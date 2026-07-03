@@ -1,130 +1,86 @@
-[build-system]
-requires = ["setuptools >= 61.0"]
-build-backend = "setuptools.build_meta"
-
 [project]
-name = "GraphPFN"
-version = "0.0.3"
-description = "GraphPFN: A Prior-Data Fitted Graph Foundation Model"
-requires-python = "==3.12.9"
-dependencies = [
-    # ==================================================================
-    # Template
-    # ==================================================================
-    "delu==0.0.26",
-    "loguru==0.7.3",
-    "numpy==2.2.4",
-    "optuna==4.2.1",
-    "PyYAML==6.0.2",
-    "rtdl-num-embeddings==0.0.11",
-    "rtdl-revisiting-models==0.0.2",
-    "scikit-learn==1.6.1",
-    "scipy==1.15.2",
-    "tensorboard==2.19.0",
-    "tomli-w==1.2.0",
-    "torch==2.4.0",
-    "tqdm==4.67.1",
-    # ==================================================================
-    # Project
-    # ==================================================================
-    "torch-geometric==2.6.1",
-    "dgl==2.4.0",
-    "ogb>=1.3.6",
-    "nvitop>=1.5.1",
-    "einops==0.8.1",
-    "loralib==0.1.2",
-    "lightgbm==4.3.0",
-    "catboost==1.2.3",
-    "xgboost==2.0.3",
-    "flash-attn==2.8.3",
-    "huggingface-hub>=0.33.1"
+name = "graphpfn"
+version = "0.1.1"
+description = "GraphPFN"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Dmitry Eremeev" },
+    { name = "Oleg Platonov" },
+    { name = "Gleb Bazhenov" },
+    { name = "Artem Babenko" },
+    { name = "Liudmila Prokhorenkova" },
 ]
+requires-python = ">=3.11,<4"
+dependencies = [
+    "numpy>=2.0",
+    "torch>=2.1,<2.5",
+    "dgl>=2.4,<2.5",
+    "scikit-learn>=1.4",
+    "optuna>=3.1.0",
+    "huggingface-hub",
+    "einops",
+    "torch-geometric",
+    "tqdm",
+    "pyyaml",
+    "pandas",
+    "delu",
+]
+
+[project.urls]
+Repository = "https://github.com/eremeev-d/graphpfn-package"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/graphpfn"]
 
 [dependency-groups]
 dev = [
-    "bokeh>=3.7.3,<4",
-    "holoviews>=1.20.2,<2",
-    "hvplot>=0.11.3,<1",
-    "ipdb>=0.13.13,<1",
-    "ipython>=9.3.0,<10",
-    "ipywidgets>=8.1.7,<9",
-    "jupyterlab>=4.4.3,<5",
-    "matplotlib>=3.10.3,<4",
-    "mypy>=1.16.1,<2",
-    "nbclassic>=1.3.1,<2",
-    "notebook>=7.4.3,<8",
-    "pandas>=2.3.0,<3",
-    "panel>=1.7.1,<2",
-    "plotnine>=0.14.5,<1",
-    "polars>=1.30.0,<2",
-    "pudb>=2025.1",
-    "pytest>=8.4.0,<9",
-    "ruff>=0.12.0,<1",
-    "seaborn>=0.13.2,<1",
-    "setuptools>=80.9.0",
-]
-local = [
-    "tabulate",
-]
-tabpfn = [
-    "tabpfn>=8.0.0"
+    "ruff>=0.9",
+    "ty>=0.0.1a0",
 ]
 
-[tool.mypy]
-check_untyped_defs = true
-ignore_missing_imports = true
-exclude = ["^local/*"]
-
-[tool.pyright]
-exclude = [
-    # Default rules
-    '**/node_modules',
-    '**/__pycache__',
-    '**/.*',
-    # Custom rules
-    "cache",
-    "data",
-    "exp",
-    "dev/exp",
-    "dev/*/exp",
-    "local",
-]
-# venv = ".venv"
-venvPath = "."
+[tool.hatch.build.targets.wheel.force-include]
+"LICENSE" = "LICENSE"
+"NOTICE" = "NOTICE"
+"LICENSES" = "LICENSES"
 
 [tool.ruff]
 line-length = 88
 extend-exclude = [
-    "vendor/**/*.py",
+    "src/graphpfn/_vendor/**/*.py",
+    "research",
 ]
-
-[tool.ruff.lint]
-extend-select = ["RUF", "UP", "E501", "E731"]
 
 [tool.ruff.format]
 quote-style = "double"
 
-[tool.setuptools]
-packages = ["lib", "bin", "vendor"]
+[tool.ruff.lint]
+extend-select = ["RUF", "UP", "E501", "E731"]
 
-[tool.uv]
-default-groups = ["dev"]
-package = true
-override-dependencies = [
-  "torch==2.4.*",
-]
-
-[tool.uv.extra-build-dependencies]
-flash-attn = [{ requirement = "torch", match-runtime = true }]
-
-[tool.uv.extra-build-variables]
-flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
+[tool.ruff.lint.isort]
+known-first-party = ["graphpfn"]
 
 [[tool.uv.index]]
-name = "dgl-index"
-url = "https://data.dgl.ai/wheels/torch-2.4/cu124/repo.html"
+name = "torch-cu118"
+url = "https://download.pytorch.org/whl/cu118"
+explicit = true
+
+[[tool.uv.index]]
+name = "dgl-cu118"
+url = "https://data.dgl.ai/wheels/torch-2.4/cu118/repo.html"
 format = "flat"
 explicit = true
 
 [tool.uv.sources]
-dgl = { index = "dgl-index" }
+torch = { index = "torch-cu118" }
+dgl = { index = "dgl-cu118" }
+
+[tool.ty.src]
+exclude = [
+    "src/graphpfn/_vendor",
+    "research",
+]
